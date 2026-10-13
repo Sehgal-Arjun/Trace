@@ -64,9 +64,12 @@ function sh(cmd: string, cwd: string, opts: { env?: Record<string, string>; time
       timedOut = true;
       killGroup();
     }, (opts.timeoutSec ?? 900) * 1000);
+    // Some test setups start watchers (e.g. `vite build --watch`) that never exit and keep our
+    // pipes open, so reap the group as soon as the command itself exits rather than on 'close'.
+    child.on('exit', killGroup);
     child.on('close', (code) => {
       clearTimeout(timer);
-      killGroup(); // reap anything left running in the background
+      killGroup();
       const out = Buffer.concat(chunks).toString('utf8');
       resolve({ code: timedOut ? -1 : (code ?? -1), out: timedOut ? `${out}\n[timed out after ${opts.timeoutSec ?? 900}s]` : out });
     });

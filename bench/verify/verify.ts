@@ -7,7 +7,7 @@
 // Usage: node bench/verify/verify.ts owner/repo#issue [--keep-going]
 // Writes bench/data/verified/<owner>__<repo>__<issue>.json
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -35,15 +35,42 @@ type Probe = { sha: string; outcome: Outcome; detail: string; seconds: number };
 
 const log = (...a: unknown[]) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
 
-function sh(cmd: string, cwd: string, opts: { env?: Record<string, string>; timeoutSec?: number } = {}) {
-  const r = spawnSync('bash', ['-lc', cmd], {
-    cwd,
-    env: { ...process.env, CI: '1', HUSKY: '0', ...opts.env },
-    encoding: 'utf8',
-    timeout: (opts.timeoutSec ?? 900) * 1000,
-    maxBuffer: 256 * 1024 * 1024,
+// Runs a shell command in its own process group so a timeout kills everything it started
+// (test runners and builds spawn workers that otherwise outlive the shell and hold its pipes).
+function sh(cmd: string, cwd: string, opts: { env?: Record<string, string>; timeoutSec?: number } = {}): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('bash', ['-lc', cmd], {
+      cwd,
+      env: { ...process.env, CI: '1', HUSKY: '0', ...opts.env },
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const keep = (b: Buffer) => {
+      chunks.push(b);
+      size += b.length;
+      while (size > 4 * 1024 * 1024 && chunks.length > 1) size -= chunks.shift()!.length; // keep the tail
+    };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    let timedOut = false;
+    const killGroup = () => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {}
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, (opts.timeoutSec ?? 900) * 1000);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      killGroup(); // reap anything left running in the background
+      const out = Buffer.concat(chunks).toString('utf8');
+      resolve({ code: timedOut ? -1 : (code ?? -1), out: timedOut ? `${out}\n[timed out after ${opts.timeoutSec ?? 900}s]` : out });
+    });
   });
-  return { code: r.status ?? -1, out: (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
 function git(cwd: string, ...args: string[]) {
@@ -158,26 +185,26 @@ class Harness {
     }
   }
 
-  install(): string | null {
+  async install(): Promise<string | null> {
     const key = lockKey(this.workDir);
     if (key === this.installedKey) return null;
     const cmd = this.recipe.install ?? defaultInstall(this.workDir);
     log(`  install (${cmd.split('||')[0].trim()})`);
-    const r = sh(cmd, this.workDir, { env: this.recipe.env, timeoutSec: 1800 });
+    const r = await sh(cmd, this.workDir, { env: this.recipe.env, timeoutSec: 1800 });
     if (r.code !== 0) return `install failed: ${r.out.slice(-1500)}`;
     if (this.recipe.prepare) {
-      const p = sh(this.recipe.prepare, this.workDir, { env: this.recipe.env, timeoutSec: 1800 });
+      const p = await sh(this.recipe.prepare, this.workDir, { env: this.recipe.env, timeoutSec: 1800 });
       if (p.code !== 0) return `prepare failed: ${p.out.slice(-1500)}`;
     }
     this.installedKey = key;
     return null;
   }
 
-  probe(sha: string): Probe {
+  async probe(sha: string): Promise<Probe> {
     const t0 = Date.now();
     const done = (outcome: Outcome, detail: string): Probe => ({ sha, outcome, detail, seconds: Math.round((Date.now() - t0) / 1000) });
     this.checkout(sha);
-    const err = this.install();
+    const err = await this.install();
     if (err) return done('skip', err);
 
     let anyFail = false;
@@ -194,7 +221,7 @@ class Harness {
         r.runner === 'vitest'
           ? `${bin('vitest')} run ${JSON.stringify(rel)} --reporter=json --outputFile=${JSON.stringify(out)}${filter}`
           : `${bin('jest')} ${JSON.stringify(rel)} --ci --json --outputFile=${JSON.stringify(out)}${filter}`;
-      const res = sh(cmd, r.pkgDir, { env: this.recipe.env, timeoutSec: this.recipe.timeoutSec ?? 600 });
+      const res = await sh(cmd, r.pkgDir, { env: this.recipe.env, timeoutSec: this.recipe.timeoutSec ?? 600 });
       if (!existsSync(out)) return done('skip', `no report (exit ${res.code}): ${res.out.slice(-1500)}`);
       const rep = JSON.parse(readFileSync(out, 'utf8')) as JsonReport;
       const fileRes = rep.testResults?.[0];
@@ -241,19 +268,19 @@ async function main() {
 
   const h = new Harness(c.repo, repoDir, fix, [...testFiles, ...support], targets, recipe);
   const probes = record.probes as Probe[];
-  const run = (sha: string, label: string) => {
-    const p = h.probe(sha);
+  const run = async (sha: string, label: string) => {
+    const p = await h.probe(sha);
     probes.push(p);
     log(`  ${label} ${sha.slice(0, 9)} → ${p.outcome} (${p.seconds}s) ${p.outcome === 'skip' ? p.detail.slice(0, 300).replace(/\s+/g, ' ') : p.detail}`);
     save('in-progress');
     return p;
   };
 
-  const atFix = run(fix, 'fix');
+  const atFix = await run(fix, 'fix');
   // Couldn't install at all: that's our environment, not the bug. Keep it for a retry.
   if (atFix.outcome === 'skip' && /^(install|prepare) failed/.test(atFix.detail)) return save('infra-error', { reason: atFix.detail.slice(0, 200) });
   if (atFix.outcome !== 'pass') return save('rejected', { reason: `tests do not pass at fix commit (${atFix.outcome})` });
-  const atPre = run(pre, 'pre-fix');
+  const atPre = await run(pre, 'pre-fix');
   if (atPre.outcome !== 'fail') return save('rejected', { reason: `tests do not fail before the fix (${atPre.outcome})` });
 
   // Walk back along first-parent history to find a passing commit.
@@ -263,9 +290,9 @@ async function main() {
   for (const back of [8, 32, 128, 512, 2000, history.length - 1]) {
     const i = Math.min(back, history.length - 1);
     if (i <= badIdx) continue;
-    let p = run(history[i], `back ${i}`);
+    let p = await run(history[i], `back ${i}`);
     // A skip usually means the test can't compile that far back; nudge forward a little before giving up on this distance.
-    for (let k = 1; p.outcome === 'skip' && k <= 3 && i - k * 2 > badIdx; k++) p = run(history[i - k * 2], `back ${i - k * 2}`);
+    for (let k = 1; p.outcome === 'skip' && k <= 3 && i - k * 2 > badIdx; k++) p = await run(history[i - k * 2], `back ${i - k * 2}`);
     if (p.outcome === 'pass') { goodIdx = history.indexOf(p.sha); break; }
     if (p.outcome === 'fail') badIdx = history.indexOf(p.sha);
     if (p.outcome === 'skip') break; // tests can't run this far back; stop searching
@@ -280,7 +307,7 @@ async function main() {
     // Pick the nearest untried index to mid that isn't known-skippable.
     const order = [mid, ...Array.from({ length: hi - lo - 1 }, (_, k) => [mid + k + 1, mid - k - 1]).flat()].filter((x) => x > lo && x < hi && !skipped.has(x));
     if (order.length === 0) break;
-    const p = run(history[order[0]], `bisect [${lo}..${hi}]`);
+    const p = await run(history[order[0]], `bisect [${lo}..${hi}]`);
     if (p.outcome === 'pass') hi = order[0];
     else if (p.outcome === 'fail') lo = order[0];
     else skipped.add(order[0]);

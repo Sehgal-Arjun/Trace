@@ -250,6 +250,8 @@ async function main() {
   };
 
   const atFix = run(fix, 'fix');
+  // Couldn't install at all: that's our environment, not the bug. Keep it for a retry.
+  if (atFix.outcome === 'skip' && /^(install|prepare) failed/.test(atFix.detail)) return save('infra-error', { reason: atFix.detail.slice(0, 200) });
   if (atFix.outcome !== 'pass') return save('rejected', { reason: `tests do not pass at fix commit (${atFix.outcome})` });
   const atPre = run(pre, 'pre-fix');
   if (atPre.outcome !== 'fail') return save('rejected', { reason: `tests do not fail before the fix (${atPre.outcome})` });

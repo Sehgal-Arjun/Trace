@@ -297,10 +297,21 @@ async function main() {
     // A skip usually means the test can't compile that far back; nudge forward a little before giving up on this distance.
     for (let k = 1; p.outcome === 'skip' && k <= 3 && i - k * 2 > badIdx; k++) p = await run(history[i - k * 2], `back ${i - k * 2}`);
     if (p.outcome === 'pass') { goodIdx = history.indexOf(p.sha); break; }
-    if (p.outcome === 'fail') badIdx = history.indexOf(p.sha);
-    if (p.outcome === 'skip') break; // tests can't run this far back; stop searching
+    if (p.outcome === 'fail') { badIdx = history.indexOf(p.sha); continue; }
+    // The test can't run this far back (renamed modules, missing APIs). Passing commits, if any,
+    // sit between the last failure and here, so binary-search that gap: a pass ends the search,
+    // a failure means look further back, a skip means look closer to the fix.
+    let lo = badIdx, hi = history.indexOf(p.sha);
+    while (goodIdx === -1 && hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      const q = await run(history[mid], `runnable [${lo}..${hi}]`);
+      if (q.outcome === 'pass') goodIdx = mid;
+      else if (q.outcome === 'fail') lo = badIdx = mid;
+      else hi = mid;
+    }
+    break;
   }
-  if (goodIdx === -1) return save('not-regression', { reason: 'no passing commit found in history', oldestFailing: history[badIdx] });
+  if (goodIdx === -1) return save('not-regression', { reason: 'test fails at every commit where it can run', oldestFailing: history[badIdx] });
 
   // Binary search: history[badIdx] fails, history[goodIdx] passes (badIdx < goodIdx, index grows into the past).
   const skipped = new Set<number>();

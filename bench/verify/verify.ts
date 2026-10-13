@@ -33,7 +33,7 @@ type Candidate = {
 type Outcome = 'pass' | 'fail' | 'skip';
 type Probe = { sha: string; outcome: Outcome; detail: string; seconds: number };
 
-const log = (...a: unknown[]) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
+const log = (...a: unknown[]) => console.log(`[${new Date().toLocaleTimeString('en-GB', { hour12: false })}]`, ...a);
 
 // Runs a shell command in its own process group so a timeout kills everything it started
 // (test runners and builds spawn workers that otherwise outlive the shell and hold its pipes).

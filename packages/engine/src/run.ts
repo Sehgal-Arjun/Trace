@@ -2,7 +2,8 @@ import type { Bisect, Commit, Probe, Repo, Report, ReproTest, RootCause, Run } f
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { findCulprit, type SearchResult } from "./bisect.ts";
-import { investigate, type BugReport, type Finding } from "./investigate.ts";
+import { investigate, type BugReport, type Finding, type InvestigateResult, type Usage } from "./investigate.ts";
+import { DEFAULT_LADDER, type Tier } from "./models.ts";
 import { Sandbox } from "./sandbox.ts";
 import { git } from "./shell.ts";
 import { detectRunner, runTestFile, testCommand } from "./tests.ts";
@@ -15,6 +16,10 @@ export type TraceOptions = {
   /** How many times to rerun the test at HEAD to check it isn't flaky. */
   reruns?: number;
   install?: string;
+  /** Models to try in order; the next one runs only if the previous couldn't reproduce the bug. */
+  ladder?: Tier[];
+  /** Direction from a person, e.g. an "@trace that's not it, …" correction. */
+  context?: string;
   log?: (line: string) => void;
 };
 
@@ -28,9 +33,19 @@ export async function trace(o: TraceOptions): Promise<Run> {
   try {
     log(`investigating at ${sandbox.head.slice(0, 9)}`);
     const bug: BugReport = { title: o.report.title, body: o.report.body };
-    const inv = await investigate(sandbox, bug, { onEvent: (e) => log(`  ${e}`) });
-    log(`model usage: ${inv.usage.requests} requests, ${inv.usage.inputTokens} in / ${inv.usage.outputTokens} out tokens`);
-    if (!inv.ok) return { ...base, status: "not_reproduced", error: inv.reason, finishedAt: new Date().toISOString() };
+    const usage: Usage[] = [];
+    let inv: InvestigateResult | undefined;
+    for (const tier of o.ladder ?? DEFAULT_LADDER) {
+      sandbox.cleanup();
+      log(`trying ${tier.model} (effort ${tier.effort}, up to $${tier.budgetUsd.toFixed(2)})`);
+      inv = await investigate(sandbox, bug, tier, { context: o.context, onEvent: (e) => log(`  ${e}`) });
+      usage.push(inv.usage);
+      log(`  ${inv.usage.requests} requests, ${inv.usage.inputTokens} in / ${inv.usage.outputTokens} out tokens, $${inv.usage.costUsd.toFixed(3)}`);
+      if (inv.ok) break;
+      log(`  ${inv.reason}`);
+    }
+    base.usage = usage;
+    if (!inv?.ok) return { ...base, status: "not_reproduced", error: inv?.reason ?? "no models to try", finishedAt: new Date().toISOString() };
     const f = inv.finding;
 
     // The test has to fail every time, not just once.

@@ -2,11 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { TraceHop } from "@trace/core";
 import { z } from "zod";
+import { describeLeads, findLeads } from "./leads.ts";
+import { costOf, SUPPORTS_FALLBACK, type Tier } from "./models.ts";
 import type { Sandbox } from "./sandbox.ts";
 import { describeRun } from "./sandbox.ts";
 import { matching, runTestFile, type TestRun } from "./tests.ts";
-
-export const MODEL = "claude-opus-5-5";
 
 export type BugReport = { title: string; body: string };
 
@@ -24,13 +24,14 @@ export type InvestigateResult =
   | { ok: true; finding: Finding; usage: Usage }
   | { ok: false; reason: string; usage: Usage };
 
-type Usage = { inputTokens: number; outputTokens: number; requests: number };
+export type Usage = { model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number };
 
 const SYSTEM = `You investigate bug reports for Trace. Someone who isn't an engineer reported a bug in the product built from this repository. Your job is to find where the bug comes from in the code and write a small automated test that reproduces it.
 
 The repository is checked out at the commit where the bug was reported. You can browse the code, search it, read its git history (only commits up to this one), write new test files, and run tests. You can't edit existing source files or run arbitrary commands.
 
 What a good result looks like:
+- Be economical: read the parts of files you need rather than whole files, and search before you read.
 - The root cause is the first place in the code where things go wrong, not where the symptom shows up. Follow the data from what the user did to the point where a value becomes wrong.
 - The test exercises that code directly, with the smallest realistic input, in the repository's existing test style and runner. Put it next to the code's existing tests, in a new file.
 - The test fails now because the behavior is wrong: an assertion about what the user expected. A test that fails because of an import error, a missing function, or a crash in the test setup doesn't count.
@@ -44,11 +45,12 @@ When the test fails for the right reason, call submit. Trace will run it itself;
 export async function investigate(
   sandbox: Sandbox,
   report: BugReport,
-  opts: { client?: Anthropic; maxIterations?: number; onEvent?: (e: string) => void } = {},
+  tier: Tier,
+  opts: { client?: Anthropic; maxIterations?: number; context?: string; onEvent?: (e: string) => void } = {},
 ): Promise<InvestigateResult> {
   const client = opts.client ?? new Anthropic();
   const log = opts.onEvent ?? (() => {});
-  const usage: Usage = { inputTokens: 0, outputTokens: 0, requests: 0 };
+  const usage: Usage = { model: tier.model, inputTokens: 0, outputTokens: 0, requests: 0, costUsd: 0 };
   let finding: Finding | null = null;
   let submits = 0;
 
@@ -172,20 +174,39 @@ export async function investigate(
     }),
   ];
 
+  const leads = describeLeads(findLeads(sandbox.root, `${report.title}\n${report.body}`));
+  const fallback = SUPPORTS_FALLBACK[tier.model];
   const runner = client.beta.messages.toolRunner({
-    model: MODEL,
+    model: tier.model,
     max_tokens: 16000,
-    max_iterations: opts.maxIterations ?? 80,
+    max_iterations: opts.maxIterations ?? 50,
     system: SYSTEM,
-    output_config: { effort: "high" },
+    output_config: { effort: tier.effort },
     cache_control: { type: "ephemeral" },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    // Old tool results (file reads, searches) are the bulk of every request; clear them once
+    // the conversation gets long, keeping the most recent few.
+    context_management: {
+      edits: [
+        {
+          type: "clear_tool_uses_20250919",
+          trigger: { type: "input_tokens", value: 40_000 },
+          keep: { type: "tool_uses", value: 6 },
+          clear_at_least: { type: "input_tokens", value: 10_000 },
+          exclude_tools: ["submit"],
+        },
+      ],
+    },
+    betas: ["context-management-2025-06-27", ...(fallback ? ["server-side-fallback-2026-07-01"] : [])],
+    ...(fallback ? { fallbacks: "default" as const } : {}),
     tools,
     messages: [
       {
         role: "user",
-        content: `Bug report\n\nTitle: ${report.title}\n\n${report.body}`,
+        content: [
+          `Bug report\n\nTitle: ${report.title}\n\n${report.body}`,
+          opts.context ? `\n\nAn engineer added: ${opts.context}` : "",
+          leads ? `\n\n${leads}` : "",
+        ].join(""),
       },
     ],
   });
@@ -196,8 +217,12 @@ export async function investigate(
     usage.requests++;
     usage.inputTokens += message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0);
     usage.outputTokens += message.usage.output_tokens;
+    usage.costUsd += costOf(tier.model, message.usage);
     if (message.stop_reason === "refusal") return { ok: false, reason: "the model declined the request", usage };
     if (finding) break;
+    if (usage.costUsd >= tier.budgetUsd) {
+      return { ok: false, reason: `Couldn't reproduce within the $${tier.budgetUsd.toFixed(2)} budget for ${tier.model}.`, usage };
+    }
   }
 
   if (finding) return { ok: true, finding, usage };

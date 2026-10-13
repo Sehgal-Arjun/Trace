@@ -1,10 +1,14 @@
 // Usage: node src/cli.ts --checkout <dir> --report <report.json> --repo owner/name [--id BUG-1] [--out run.json]
+//                        [--model claude-haiku-5-5|claude-sonnet-5-5|claude-opus-5-5] [--effort low|medium|high] [--budget 0.25]
+//
+// Without --model, Trace tries Haiku 5.5 and then Sonnet 5.5 (see DEFAULT_LADDER). --budget caps spend per model in dollars.
 //
 // <report.json> is { "title": "...", "body": "..." }. The checkout is moved between commits and
 // reset during the history search, so point this at a disposable clone, never your working copy.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { DEFAULT_LADDER, type Effort, type ModelId, type Tier } from "./models.ts";
 import { trace } from "./run.ts";
 import { git } from "./shell.ts";
 
@@ -16,8 +20,25 @@ const { values } = parseArgs({
     id: { type: "string", default: "BUG-1" },
     out: { type: "string" },
     install: { type: "string" },
+    model: { type: "string" },
+    effort: { type: "string" },
+    budget: { type: "string" },
   },
 });
+
+const MODELS: ModelId[] = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
+if (values.model && !MODELS.includes(values.model as ModelId)) {
+  console.error(`--model must be one of ${MODELS.join(", ")}`);
+  process.exit(2);
+}
+if (values.effort && !["low", "medium", "high"].includes(values.effort)) {
+  console.error("--effort must be low, medium or high");
+  process.exit(2);
+}
+const budget = values.budget ? Number(values.budget) : undefined;
+const ladder: Tier[] = values.model
+  ? [{ model: values.model as ModelId, effort: (values.effort as Effort) ?? "medium", budgetUsd: budget ?? 0.5 }]
+  : DEFAULT_LADDER.map((t) => ({ ...t, ...(values.effort ? { effort: values.effort as Effort } : {}), ...(budget ? { budgetUsd: budget } : {}) }));
 
 if (!values.checkout || !values.report || !values.repo) {
   console.error("usage: node src/cli.ts --checkout <dir> --report <report.json> --repo owner/name [--id BUG-1] [--out run.json]");
@@ -39,10 +60,13 @@ const run = await trace({
   repo: { owner, name, defaultBranch: "main" },
   report: { title: report.title, body: report.body, source: { kind: "manual" }, attachments: [], createdAt: new Date().toISOString() },
   install: values.install,
+  ladder,
   log: (l) => console.log(`[${new Date().toLocaleTimeString("en-GB", { hour12: false })}] ${l}`),
 });
 
 console.log(`\n${run.status}${run.error ? `: ${run.error}` : ""} (${Math.round((Date.now() - t0) / 1000)}s)`);
+const cost = (run.usage ?? []).reduce((a, u) => a + u.costUsd, 0);
+console.log(`model cost: $${cost.toFixed(3)} (${(run.usage ?? []).map((u) => `${u.model} $${u.costUsd.toFixed(3)}`).join(", ") || "none"})`);
 if (run.rootCause) console.log(`root cause: ${run.rootCause.symbol} at ${run.rootCause.file}:${run.rootCause.line}`);
 if (run.bisect) console.log(`culprit: ${run.bisect.culprit.sha.slice(0, 9)} ${run.bisect.culprit.subject}`);
 if (values.out) {

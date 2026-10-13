@@ -140,6 +140,8 @@ export type Run = {
   bisect?: Bisect;
   pr?: PullRequest;
   error?: string;
+  /** Model spend for the latest attempt, one entry per model tried. */
+  usage?: { model: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number }[];
   /** Earlier and current attempts, oldest first. */
   attempts?: Attempt[];
   startedAt?: string;

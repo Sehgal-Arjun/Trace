@@ -5,8 +5,9 @@ import { matching, runTestFile, type TestRun } from "./tests.ts";
 
 const TEST_FILE_RE = /(\.|_)(test|spec)\.[cm]?[jt]sx?$|(^|\/)__tests__\//;
 const FIXTURE_RE = /(^|\/)(__fixtures__|fixtures?|__mocks__)\//;
-const MAX_LINES = 400;
-const MAX_OUT = 12_000;
+// Small outputs keep every later request cheap: everything returned stays in the conversation.
+const MAX_LINES = 200;
+const MAX_OUT = 6_000;
 
 /**
  * The agent's whole view of the repository: one checkout at the commit under
@@ -43,13 +44,13 @@ export class Sandbox {
     const rel = this.resolvePath(dir);
     const files = git(this.root, "ls-files", "--", rel || ".").split("\n").filter(Boolean);
     const matched = pattern ? files.filter((f) => new RegExp(pattern).test(f)) : files;
-    const shown = matched.slice(0, 500);
+    const shown = matched.slice(0, 150);
     return shown.join("\n") + (matched.length > shown.length ? `\n… ${matched.length - shown.length} more; narrow the directory or pattern` : "");
   }
 
   grep(pattern: string, path = ".", opts: { ignoreCase?: boolean } = {}): string {
     const rel = this.resolvePath(path);
-    const out = tryGit(this.root, "grep", "-n", "-I", "-E", ...(opts.ignoreCase ? ["-i"] : []), "--max-count=20", "-e", pattern, "--", rel || ".");
+    const out = tryGit(this.root, "grep", "-n", "-I", "-E", ...(opts.ignoreCase ? ["-i"] : []), "--max-count=8", "-e", pattern, "--", rel || ".");
     if (!out) return "no matches";
     return clip(out);
   }
@@ -110,6 +111,8 @@ export class Sandbox {
   /** Removes everything the agent wrote, restoring the checkout. */
   cleanup(): void {
     for (const rel of this.written.keys()) rmSync(join(this.root, rel), { force: true });
+    this.written.clear();
+    this.lastRun = undefined;
   }
 }
 

@@ -1,4 +1,4 @@
-import type { RunStatus } from "./types";
+import type { RunStatus } from "@trace/core";
 
 type StatusStyle = {
   label: string;

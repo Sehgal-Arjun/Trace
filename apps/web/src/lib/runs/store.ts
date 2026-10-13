@@ -2,7 +2,7 @@ import "server-only";
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Report, Repo, Run } from "./types";
+import type { Report, Repo, Run } from "@trace/core";
 
 // Runs live as JSON files until there's a database. One file per run.
 const RUNS_DIR = join(process.cwd(), "data", "runs");

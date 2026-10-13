@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { getRun } from "@/lib/runs/store";
-import type { Run } from "@/lib/runs/types";
+import type { Run } from "@trace/core";
 
 /**
  * Loads the run named in the route and renders it. Run data is read per

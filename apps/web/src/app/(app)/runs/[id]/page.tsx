@@ -3,7 +3,7 @@ import { Facts, Panel } from "@/components/panel";
 import { RunView } from "@/components/run-view";
 import { duration, shortDate, shortSha } from "@/lib/format";
 import { STATUS } from "@/lib/runs/status";
-import type { Attachment, Run } from "@/lib/runs/types";
+import type { Attachment, Run } from "@trace/core";
 
 // Report tab: what the reporter sent, and a summary of what Trace found.
 export default function ReportPage({ params }: PageProps<"/runs/[id]">) {

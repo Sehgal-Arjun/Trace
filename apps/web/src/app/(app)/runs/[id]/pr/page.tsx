@@ -4,7 +4,7 @@ import { Panel } from "@/components/panel";
 import { Prose } from "@/components/prose";
 import { RunView } from "@/components/run-view";
 import { initials, shortSha, since } from "@/lib/format";
-import type { PullRequest, Run } from "@/lib/runs/types";
+import type { PullRequest, Run } from "@trace/core";
 
 // Pull request tab: what Trace opened on GitHub, as reviewers will see it.
 export default function PullRequestPage({ params }: PageProps<"/runs/[id]/pr">) {

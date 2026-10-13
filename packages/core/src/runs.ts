@@ -113,6 +113,23 @@ export type PullRequest = {
   reviewers: { name: string; reason: string }[];
 };
 
+/** One pass of the pipeline over a run. A run's top-level fields describe the latest attempt. */
+export type Attempt = {
+  n: number;
+  trigger:
+    | { kind: "initial" }
+    | { kind: "ticket_changed"; reason: string }
+    | { kind: "command"; by: string; context?: string }
+    | { kind: "button"; by: string };
+  /** The report as it read when this attempt started. */
+  report: Pick<Report, "title" | "body">;
+  status: RunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  /** e.g. "culprit 2c3e2a3, pushed to #1497" or "couldn't reproduce". */
+  summary?: string;
+};
+
 export type Run = {
   id: string; // short human id, e.g. "BUG-218"
   repo: Repo;
@@ -123,6 +140,8 @@ export type Run = {
   bisect?: Bisect;
   pr?: PullRequest;
   error?: string;
+  /** Earlier and current attempts, oldest first. */
+  attempts?: Attempt[];
   startedAt?: string;
   finishedAt?: string;
 };

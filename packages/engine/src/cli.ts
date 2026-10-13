@@ -6,11 +6,15 @@
 // <report.json> is { "title": "...", "body": "..." }. The checkout is moved between commits and
 // reset during the history search, so point this at a disposable clone, never your working copy.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { DEFAULT_LADDER, type Effort, type ModelId, type Tier } from "./models.ts";
 import { trace } from "./run.ts";
 import { git } from "./shell.ts";
+
+// Secrets such as ANTHROPIC_API_KEY come from packages/engine/.env (gitignored) if it exists.
+const envFile = new URL("../.env", import.meta.url);
+if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const { values } = parseArgs({
   options: {

@@ -4,3 +4,8 @@ node_modules/
 *.tsbuildinfo
 .env*.local
 *.log
+
+# secrets
+.env
+.env.*
+!.env.example

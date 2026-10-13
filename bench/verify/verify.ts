@@ -31,7 +31,15 @@ type Candidate = {
 };
 
 type Outcome = 'pass' | 'fail' | 'skip';
-type Probe = { sha: string; outcome: Outcome; detail: string; seconds: number };
+type Probe = {
+  sha: string;
+  outcome: Outcome;
+  detail: string;
+  seconds: number;
+  /** Target tests that failed / passed here, as "file > full name". */
+  failedTests?: string[];
+  passedTests?: string[];
+};
 
 const log = (...a: unknown[]) => console.log(`[${new Date().toLocaleTimeString('en-GB', { hour12: false })}]`, ...a);
 
@@ -205,7 +213,16 @@ class Harness {
 
   async probe(sha: string): Promise<Probe> {
     const t0 = Date.now();
-    const done = (outcome: Outcome, detail: string): Probe => ({ sha, outcome, detail, seconds: Math.round((Date.now() - t0) / 1000) });
+    const failedTests: string[] = [];
+    const passedTests: string[] = [];
+    const done = (outcome: Outcome, detail: string): Probe => ({
+      sha,
+      outcome,
+      detail,
+      seconds: Math.round((Date.now() - t0) / 1000),
+      failedTests,
+      passedTests,
+    });
     this.checkout(sha);
     const err = await this.install();
     if (err) return done('skip', err);
@@ -232,6 +249,7 @@ class Harness {
       const relevant = names.length ? asserts.filter((a) => names.some((n) => (a.title ?? a.fullName ?? '').includes(n) || (a.fullName ?? '').includes(n))) : asserts;
       if (relevant.length === 0) return done('skip', `tests did not load/run in ${file}: ${(fileRes?.message ?? res.out).slice(-1500)}`);
       const failed = relevant.filter((a) => a.status === 'failed');
+      for (const a of relevant) (a.status === 'failed' ? failedTests : passedTests).push(`${file} > ${a.fullName ?? a.title}`);
       if (failed.length) {
         anyFail = true;
         details.push(`${file}: ${failed.length}/${relevant.length} failed (${failed.map((f) => f.title).join('; ').slice(0, 300)})`);
@@ -271,8 +289,26 @@ async function main() {
 
   const h = new Harness(c.repo, repoDir, fix, [...testFiles, ...support], targets, recipe);
   const probes = record.probes as Probe[];
+  // The fix's tests can mix regression tests (behavior that used to work) with tests for
+  // behavior the fix added (which fail at every older commit). Judge each probe only on the
+  // tests that failed before the fix, and once an older commit passes some of them, narrow
+  // to those: they're the ones that pin down the regression.
+  let focus: Set<string> | null = null;
+  const judge = (p: Probe): Probe => {
+    if (!focus || p.outcome === 'skip') return p;
+    const failing = (p.failedTests ?? []).filter((t) => focus!.has(t));
+    const passing = (p.passedTests ?? []).filter((t) => focus!.has(t));
+    if (failing.length === 0 && passing.length === 0) return { ...p, outcome: 'skip', detail: `none of the tracked tests ran: ${p.detail}` };
+    if (failing.length === 0) return { ...p, outcome: 'pass' };
+    if (passing.length === 0) return { ...p, outcome: 'fail' };
+    focus = new Set(passing);
+    record.focus = [...focus];
+    record.droppedTests = failing;
+    log(`  narrowing to ${passing.length} test(s) that pass here; ${failing.length} never passed and look like new behavior`);
+    return { ...p, outcome: 'pass', detail: `${p.detail} (narrowed to tests that pass here)` };
+  };
   const run = async (sha: string, label: string) => {
-    const p = await h.probe(sha);
+    const p = judge(await h.probe(sha));
     probes.push(p);
     log(`  ${label} ${sha.slice(0, 9)} → ${p.outcome} (${p.seconds}s) ${p.outcome === 'skip' ? p.detail.slice(0, 300).replace(/\s+/g, ' ') : p.detail}`);
     save('in-progress');
@@ -285,6 +321,8 @@ async function main() {
   if (atFix.outcome !== 'pass') return save('rejected', { reason: `tests do not pass at fix commit (${atFix.outcome})` });
   const atPre = await run(pre, 'pre-fix');
   if (atPre.outcome !== 'fail') return save('rejected', { reason: `tests do not fail before the fix (${atPre.outcome})` });
+  focus = new Set(atPre.failedTests);
+  record.focus = [...focus];
 
   // Walk back along first-parent history to find a passing commit.
   const history = git(repoDir, 'rev-list', '--first-parent', '--max-count=4000', pre).split('\n'); // history[0] = pre

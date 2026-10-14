@@ -96,7 +96,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
     log("searching history");
     const s = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, install: o.install, log: (l) => log(`  ${l}`) });
     const finishedAt = new Date().toISOString();
-    if (s.status === "found") return { ...run, status: "culprit_found", bisect: bisectOf(sandbox.root, s), finishedAt };
+    if (s.status === "found") return { ...run, status: "culprit_found", bisect: bisectOf(sandbox.root, s, o.repo), finishedAt };
     if (s.status === "not-regression") return { ...run, status: "not_regression", finishedAt };
     return { ...run, status: "errored", error: s.reason, finishedAt };
   }
@@ -134,19 +134,24 @@ function rootCauseOf(root: string, f: Finding): RootCause {
   return { symbol, file, line, summary, path: f.path, ...(snippet ? { snippet } : {}) };
 }
 
-function commitOf(root: string, sha: string): Commit {
+function commitOf(root: string, sha: string, repo: Repo): Commit {
   const [full, author, email, date, subject] = git(root, "show", "-s", "--format=%H%n%an%n%ae%n%aI%n%s", sha).split("\n");
   const pr = subject.match(/\(#(\d+)\)\s*$/);
-  return { sha: full, subject: subject.trim(), author, email, date, ...(pr ? { pr: { number: Number(pr[1]), title: subject.replace(/\s*\(#\d+\)\s*$/, "").trim(), url: "" } } : {}) };
+  return { sha: full, subject: subject.trim(), author, email, date, ...(pr ? { pr: { number: Number(pr[1]), title: subject.replace(/\s*\(#\d+\)\s*$/, "").trim(), url: `https://github.com/${repo.owner}/${repo.name}/pull/${pr[1]}` } } : {}) };
 }
 
-function bisectOf(root: string, s: Extract<SearchResult, { status: "found" }>): Bisect {
-  const probes: Probe[] = s.probes.map((p) => ({ commit: commitOf(root, p.sha), outcome: p.outcome, seconds: p.seconds, index: p.index, ...(p.reason ? { reason: p.reason } : {}) }));
-  const stat = git(root, "show", "--numstat", "--format=", s.culprit).split("\n").filter(Boolean);
+function bisectOf(root: string, s: Extract<SearchResult, { status: "found" }>, repo: Repo): Bisect {
+  const probes: Probe[] = s.probes.map((p) => ({ commit: commitOf(root, p.sha, repo), outcome: p.outcome, seconds: p.seconds, index: p.index, ...(p.reason ? { reason: p.reason } : {}) }));
+  // Source changes first: that's where the bug came in. Tests the commit updated come after.
+  const isTest = (row: string) => /(\.|_)(test|spec)\.|__tests__\//.test(row);
+  const stat = git(root, "show", "--numstat", "--format=", s.culprit)
+    .split("\n")
+    .filter(Boolean)
+    .sort((a, b) => Number(isTest(a)) - Number(isTest(b)));
   const diff = stat.slice(0, 8).map((row) => {
     const [add, del, file] = row.split("\t");
     const patch = git(root, "show", "--format=", "--unified=3", s.culprit, "--", file);
     return { file, additions: Number(add) || 0, deletions: Number(del) || 0, patch: patch.split("\n").slice(4, 80).join("\n") };
   });
-  return { culprit: commitOf(root, s.culprit), lastGood: commitOf(root, s.lastGood), commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
+  return { culprit: commitOf(root, s.culprit, repo), lastGood: commitOf(root, s.lastGood, repo), commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
 }

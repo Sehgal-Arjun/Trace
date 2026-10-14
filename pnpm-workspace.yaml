@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - bench
 allowBuilds:
   sharp: false
   unrs-resolver: false

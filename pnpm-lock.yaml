@@ -48,6 +48,22 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  bench:
+    dependencies:
+      '@trace/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@trace/engine':
+        specifier: workspace:*
+        version: link:../packages/engine
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   packages/core:
     devDependencies:
       '@types/node':

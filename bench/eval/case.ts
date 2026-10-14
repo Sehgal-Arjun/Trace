@@ -29,7 +29,7 @@ type Case = {
 };
 
 export type Truth =
-  | { status: "invalid"; reason: string }
+  | { status: "invalid"; reason: string; diagnostics?: string[] }
   | { status: "found"; culprit: string; subject: string; testFile: string; testNames: string[]; searchSeconds: number }
   | { status: "not-regression" | "inconclusive"; reason?: string; testFile: string; testNames: string[] };
 
@@ -171,9 +171,19 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   reset(root, fix);
   const installAtFix = await ensureInstalled(root);
   if (installAtFix) return { status: "invalid", reason: `install failed at the fix: ${installAtFix.slice(-200)}` };
+  // What each test file did at the fix and before it, kept so an invalid case can be understood.
+  const diagnostics: string[] = [];
+  const describe = (at: string, f: string, r: Awaited<ReturnType<typeof runTestFile>>) => {
+    const line = r.ran
+      ? `${at} ${f}: ${r.cases.filter((x) => x.status === "passed").length} passed, ${r.cases.filter((x) => x.status === "failed" && x.assertion).length} failed on assertions, ${r.cases.filter((x) => x.status === "failed" && !x.assertion).length} crashed`
+      : `${at} ${f}: didn't run: ${(r.loadError ?? "").replace(/\s+/g, " ").trim().slice(-400)}`;
+    diagnostics.push(line);
+    log(`truth: ${line}`);
+  };
   const passingAtFix = new Map<string, Set<string>>();
   for (const f of tests) {
     const r = await runTestFile(root, f);
+    describe("at fix", f, r);
     passingAtFix.set(f, new Set(r.cases.filter((x) => x.status === "passed").map((x) => x.name)));
   }
 
@@ -184,10 +194,11 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   let best: { file: string; names: string[] } | null = null;
   for (const f of tests) {
     const r = await runTestFile(root, f);
+    describe("before fix", f, r);
     const names = r.cases.filter((x) => x.status === "failed" && x.assertion && passingAtFix.get(f)?.has(x.name)).map((x) => x.name);
     if (names.length && (!best || names.length > best.names.length)) best = { file: f, names };
   }
-  if (!best) return { status: "invalid", reason: "none of the fix's tests pass at the fix and fail on an assertion before it" };
+  if (!best) return { status: "invalid", reason: "none of the fix's tests pass at the fix and fail on an assertion before it", diagnostics };
 
   const t = Date.now();
   const s: SearchResult = await findCulprit({ root, start: pre, files, testFile: best.file, testNames: best.names, log: (l) => log(`truth: ${l}`) });

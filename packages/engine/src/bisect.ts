@@ -31,7 +31,7 @@ export type SearchOptions = {
   testFile: string;
   /** Tests that fail at `start`; the search judges commits only on these. */
   testNames: string[];
-  install?: string;
+  setup?: Setup;
   maxHistory?: number;
   log?: (line: string) => void;
 };
@@ -67,7 +67,7 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     };
 
     checkout(o.root, sha, o.files);
-    const err = await ensureInstalled(o.root, o.install);
+    const err = await ensureInstalled(o.root, o.setup);
     if (err) return done("skip", err);
     const run = await runTestFile(o.root, o.testFile, { names: [...focus], timeoutSec: 600 });
     return judge(run, done);
@@ -145,23 +145,47 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     return { status: "found", culprit: history[lo], lastGood: history[hi], probes, commitsSearched: good, seconds: elapsed(), testNames: [...focus] };
   } finally {
     checkout(o.root, o.start, o.files);
-    await ensureInstalled(o.root, o.install);
+    await ensureInstalled(o.root, o.setup);
   }
 }
 
+/** How to get a checkout ready to run tests. */
+export type Setup = {
+  /** Replaces the detected package-manager install. */
+  install?: string;
+  /** Runs after install at every commit, for builds or codegen the tests depend on. */
+  prepare?: string;
+  /** Let packages run their install scripts (native modules, postinstall builds). Off by default. */
+  scripts?: boolean;
+};
+
 /**
- * Installs dependencies if the lockfile differs from the one last installed here. The key of
- * the installed lockfile is kept in node_modules, so this holds across processes and catches a
- * checkout whose dependencies belong to some other commit.
+ * Makes the checkout ready to run tests: installs dependencies if the lockfile differs from the
+ * one last installed here, then runs the prepare step if this commit hasn't been prepared. Both
+ * keys are kept in node_modules, so this holds across processes and catches a checkout whose
+ * dependencies or build output belong to some other commit.
  */
-export async function ensureInstalled(root: string, install?: string): Promise<string | null> {
-  const marker = join(root, "node_modules", ".trace-lockfile");
-  const key = lockKey(root);
-  if (existsSync(marker) && readFileSync(marker, "utf8") === key) return null;
-  const r = await sh(install ?? defaultInstall(root), root, { env: nodeEnv(root), timeoutSec: 1800 });
-  if (r.code !== 0) return `install failed: ${r.out.slice(-300)}`;
-  mkdirSync(dirname(marker), { recursive: true });
-  writeFileSync(marker, key);
+export async function ensureInstalled(root: string, setup: Setup = {}): Promise<string | null> {
+  // Yarn 2+ refuses to install when Node doesn't exactly match a pinned version; close is fine.
+  const env = { ...nodeEnv(root), YARN_IGNORE_NODE: "1" };
+  const installMarker = join(root, "node_modules", ".trace-lockfile");
+  const installKey = lockKey(root);
+  if (!(existsSync(installMarker) && readFileSync(installMarker, "utf8") === installKey)) {
+    const r = await sh(setup.install ?? defaultInstall(root, setup.scripts ?? false), root, { env, timeoutSec: 1800 });
+    if (r.code !== 0) return `install failed: ${r.out.slice(-300)}`;
+    mkdirSync(dirname(installMarker), { recursive: true });
+    writeFileSync(installMarker, installKey);
+  }
+  if (setup.prepare) {
+    // Build output depends on the source, so prepare again whenever the commit changes.
+    const prepMarker = join(root, "node_modules", ".trace-prepared");
+    const prepKey = `${git(root, "rev-parse", "HEAD")} ${setup.prepare}`;
+    if (!(existsSync(prepMarker) && readFileSync(prepMarker, "utf8") === prepKey)) {
+      const r = await sh(setup.prepare, root, { env, timeoutSec: 1800 });
+      if (r.code !== 0) return `prepare failed: ${r.out.slice(-300)}`;
+      writeFileSync(prepMarker, prepKey);
+    }
+  }
   return null;
 }
 
@@ -184,15 +208,17 @@ function lockKey(root: string): string {
   return h.digest("hex");
 }
 
-export function defaultInstall(root: string): string {
+export function defaultInstall(root: string, scripts = false): string {
   // Engine checks are relaxed: old commits often declare a narrower Node range than they need.
+  const noScripts = scripts ? "" : " --ignore-scripts";
   if (existsSync(join(root, "pnpm-lock.yaml"))) {
-    return "corepack pnpm install --frozen-lockfile --ignore-scripts --config.engine-strict=false || corepack pnpm install --ignore-scripts --config.engine-strict=false";
+    return `corepack pnpm install --frozen-lockfile${noScripts} --config.engine-strict=false || corepack pnpm install${noScripts} --config.engine-strict=false`;
   }
   if (existsSync(join(root, "yarn.lock"))) {
+    const berryEnv = scripts ? "" : "YARN_ENABLE_SCRIPTS=0 ";
     return existsSync(join(root, ".yarnrc.yml"))
-      ? "YARN_ENABLE_SCRIPTS=0 corepack yarn install --immutable || YARN_ENABLE_SCRIPTS=0 corepack yarn install"
-      : "corepack yarn install --frozen-lockfile --ignore-scripts --ignore-engines";
+      ? `${berryEnv}corepack yarn install --immutable || ${berryEnv}corepack yarn install`
+      : `corepack yarn install --frozen-lockfile${noScripts} --ignore-engines`;
   }
-  return "npm ci --ignore-scripts || npm install --ignore-scripts";
+  return `npm ci${noScripts} || npm install${noScripts}`;
 }

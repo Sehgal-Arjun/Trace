@@ -35,6 +35,10 @@ export function detectRunner(root: string, testFile: string): { runner: Runner; 
       const p = JSON.parse(readFileSync(pj, "utf8"));
       const deps = { ...p.dependencies, ...p.devDependencies };
       const scripts = JSON.stringify(p.scripts ?? {});
+      // The package's own test script wins: some depend on both runners but test with one.
+      const testScript = String(p.scripts?.test ?? "");
+      if (/\bvitest\b/.test(testScript)) return { runner: "vitest", pkgDir: d };
+      if (/\bjest\b/.test(testScript)) return { runner: "jest", pkgDir: d };
       if (deps.vitest || /vitest/.test(scripts)) return { runner: "vitest", pkgDir: d };
       if (deps.jest || /\bjest\b/.test(scripts)) return { runner: "jest", pkgDir: d };
     }

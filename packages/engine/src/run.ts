@@ -1,7 +1,7 @@
 import type { Bisect, Commit, Probe, Repo, Report, ReproTest, RootCause, Run } from "@trace/core";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureInstalled, findCulprit, type SearchResult } from "./bisect.ts";
+import { ensureInstalled, findCulprit, type SearchResult, type Setup } from "./bisect.ts";
 import { investigate, type BugReport, type Finding, type InvestigateResult, type Usage } from "./investigate.ts";
 import { DEFAULT_LADDER, type Tier } from "./models.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -15,7 +15,7 @@ export type TraceOptions = {
   report: Report;
   /** How many times to rerun the test at HEAD to check it isn't flaky. */
   reruns?: number;
-  install?: string;
+  setup?: Setup;
   /** Models to try in order; the next one runs only if the previous couldn't reproduce the bug. */
   ladder?: Tier[];
   /** Direction from a person, e.g. an "@trace that's not it, …" correction. */
@@ -51,7 +51,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
     progress(base);
     // Dependencies must match this commit before any test runs; an interrupted search can leave
     // another commit's node_modules behind.
-    const installError = await ensureInstalled(sandbox.root, o.install);
+    const installError = await ensureInstalled(sandbox.root, o.setup);
     if (installError) return { ...base, status: "errored", error: installError, finishedAt: new Date().toISOString() };
     log(`investigating at ${sandbox.head.slice(0, 9)}`);
     const bug: BugReport = { title: o.report.title, body: o.report.body };
@@ -94,7 +94,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
   async function search(run: Run, files: Map<string, string>, testFile: string, testNames: string[]): Promise<Run> {
     progress(run);
     log("searching history");
-    const s = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, install: o.install, log: (l) => log(`  ${l}`) });
+    const s = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, setup: o.setup, log: (l) => log(`  ${l}`) });
     const finishedAt = new Date().toISOString();
     if (s.status === "found") return { ...run, status: "culprit_found", bisect: bisectOf(sandbox.root, s, o.repo), finishedAt };
     if (s.status === "not-regression") return { ...run, status: "not_regression", finishedAt };

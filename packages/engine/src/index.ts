@@ -1,4 +1,4 @@
-export { ensureInstalled, findCulprit, type SearchResult } from "./bisect.ts";
+export { ensureInstalled, findCulprit, type SearchResult, type Setup } from "./bisect.ts";
 export { investigate, type BugReport, type Finding, type Usage } from "./investigate.ts";
 export { costOf, DEFAULT_LADDER, type Effort, type ModelId, type Tier } from "./models.ts";
 export { trace, type TraceOptions } from "./run.ts";

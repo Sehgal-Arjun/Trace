@@ -68,7 +68,7 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile --filter @trace/bench...
       - name: Run case
-        run: node bench/eval/case.ts --id "$CASE_ID" --work "$RUNNER_TEMP/trace" --out results
+        run: node bench/eval/case.ts --id "$CASE_ID" --work "$RUNNER_TEMP/trace" --out results --scripts
       - name: Name the artifact
         if: always()
         run: echo "SLUG=$(echo "$CASE_ID" | tr '/#' '__')" >> "$GITHUB_ENV"

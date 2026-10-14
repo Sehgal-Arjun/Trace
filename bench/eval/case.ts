@@ -7,6 +7,8 @@
 //
 // Usage: node bench/eval/case.ts --id owner/repo#123 [--work bench/.cache] [--out bench/data/eval] [--checkout <dir>]
 // --checkout reuses an existing clone of the case's repo instead of cloning one under --work.
+// --scripts lets packages run install scripts; use it on throwaway machines (CI), not locally.
+// Per-repo setup (build or codegen steps the tests need) comes from recipes.json.
 // Writes <out>/<slug>.json (scores) and <out>/<slug>.run.json (the engine's Run).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Run } from "@trace/core";
-import { ensureInstalled, findCulprit, git, runTestFile, trace, tryGit, type SearchResult } from "@trace/engine";
+import { ensureInstalled, findCulprit, git, runTestFile, trace, tryGit, type SearchResult, type Setup } from "@trace/engine";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const envFile = join(HERE, "..", "..", "packages", "engine", ".env");
@@ -64,6 +66,7 @@ const { values } = parseArgs({
     work: { type: "string", default: join(HERE, "..", ".cache") },
     out: { type: "string", default: join(HERE, "..", "data", "eval") },
     checkout: { type: "string" },
+    scripts: { type: "boolean", default: false },
   },
 });
 if (!values.id) {
@@ -74,6 +77,10 @@ if (!values.id) {
 const cases = readFileSync(join(HERE, "cases.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Case);
 const c = cases.find((x) => x.id === values.id);
 if (!c) throw new Error(`no case ${values.id} in cases.jsonl`);
+
+const recipes = JSON.parse(readFileSync(join(HERE, "recipes.json"), "utf8")) as Record<string, Setup & { note?: string }>;
+const { note: _note, ...recipe } = recipes[c.repo] ?? {};
+const setup: Setup = { scripts: values.scripts, ...recipe };
 
 const slug = c.id.replace(/[/#]/g, "__");
 const outDir = resolve(values.out!);
@@ -105,6 +112,7 @@ try {
     root,
     repo: { owner: c.repo.split("/")[0], name: c.repo.split("/")[1], defaultBranch: "main" },
     report: { title: c.report.title, body: c.report.body, source: { kind: "manual" }, attachments: [], createdAt: new Date().toISOString() },
+    setup,
     log: (l) => log(`trace: ${l}`),
   });
   writeFileSync(join(outDir, `${slug}.run.json`), JSON.stringify(run, null, 2));
@@ -169,7 +177,7 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   const files = new Map([...tests, ...support].map((f) => [f, git(root, "show", `${fix}:${f}`)]));
 
   reset(root, fix);
-  const installAtFix = await ensureInstalled(root);
+  const installAtFix = await ensureInstalled(root, setup);
   if (installAtFix) return { status: "invalid", reason: `install failed at the fix: ${installAtFix.slice(-200)}` };
   // What each test file did at the fix and before it, kept so an invalid case can be understood.
   const diagnostics: string[] = [];
@@ -189,7 +197,7 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
 
   reset(root, pre);
   writeFiles(root, files);
-  const installAtPre = await ensureInstalled(root);
+  const installAtPre = await ensureInstalled(root, setup);
   if (installAtPre) return { status: "invalid", reason: `install failed before the fix: ${installAtPre.slice(-200)}` };
   let best: { file: string; names: string[] } | null = null;
   for (const f of tests) {
@@ -201,7 +209,7 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   if (!best) return { status: "invalid", reason: "none of the fix's tests pass at the fix and fail on an assertion before it", diagnostics };
 
   const t = Date.now();
-  const s: SearchResult = await findCulprit({ root, start: pre, files, testFile: best.file, testNames: best.names, log: (l) => log(`truth: ${l}`) });
+  const s: SearchResult = await findCulprit({ root, start: pre, files, testFile: best.file, testNames: best.names, setup, log: (l) => log(`truth: ${l}`) });
   if (s.status === "found") {
     return {
       status: "found",
@@ -220,7 +228,7 @@ async function passesAt(root: string, fix: string, run: Run): Promise<boolean | 
   const t = run.test!;
   reset(root, fix);
   writeFiles(root, new Map([[t.file, t.code], ...(t.fixtures ?? []).map((f) => [f.file, f.code] as [string, string])]));
-  if (await ensureInstalled(root)) return null;
+  if (await ensureInstalled(root, setup)) return null;
   const r = await runTestFile(root, t.file, { names: t.names });
   return r.ran && r.cases.length > 0 && r.cases.every((x) => x.status === "passed");
 }

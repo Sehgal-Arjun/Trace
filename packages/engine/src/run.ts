@@ -28,6 +28,14 @@ export type TraceOptions = {
   log?: (line: string) => void;
 };
 
+/** Investigate-and-search rounds per run: the first, plus one retry when the test can't be right. */
+const MAX_ROUNDS = 2;
+
+/** Whether the reporter says the behavior worked before, i.e. it's a regression. */
+export function saysItUsedToWork(text: string): boolean {
+  return /\bused to\b|\bno longer\b|\banymore\b|\bstopped\b|\bworked (fine|before|until)|\bsince (the |we |i |our |upgrad|updat|v?\d)|\bafter (the |our |we |i )?(latest |recent |last )?(updat|upgrad)|\bprevious (version|release)|\bbefore the (update|upgrade)|\bbroke\b/i.test(text);
+}
+
 /** Runs the whole pipeline on a disposable checkout and returns the Run record. */
 export async function trace(o: TraceOptions): Promise<Run> {
   const log = o.log ?? (() => {});
@@ -41,6 +49,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
   const sandbox = new Sandbox(o.root, o.setup);
   const base: Run = { id: o.id, repo: o.repo, commit: sandbox.head, report: o.report, status: "tracing", startedAt };
   const progress = o.onProgress ?? (() => {});
+  let lastSearch: SearchResult | undefined;
 
   try {
     const saved = o.resume;
@@ -57,35 +66,60 @@ export async function trace(o: TraceOptions): Promise<Run> {
     log(`investigating at ${sandbox.head.slice(0, 9)}`);
     const bug: BugReport = { title: o.report.title, body: o.report.body };
     const usage: Usage[] = [];
-    let inv: InvestigateResult | undefined;
-    for (const tier of o.ladder ?? DEFAULT_LADDER) {
-      sandbox.cleanup();
-      log(`trying ${tier.model} (effort ${tier.effort}, up to $${tier.budgetUsd.toFixed(2)})`);
-      inv = await investigate(sandbox, bug, tier, { context: o.context, onEvent: (e) => log(`  ${e}`) });
-      usage.push(inv.usage);
-      log(`  ${inv.usage.requests} requests, ${inv.usage.inputTokens} in / ${inv.usage.outputTokens} out tokens, $${inv.usage.costUsd.toFixed(3)}`);
-      if (inv.ok) break;
-      log(`  ${inv.reason}`);
-    }
     base.usage = usage;
-    if (!inv?.ok) return { ...base, status: "not_reproduced", error: inv?.reason ?? "no models to try", finishedAt: new Date().toISOString() };
-    const f = inv.finding;
+    let context = o.context;
+    let previous: Run | undefined;
 
-    // The test has to fail every time, not just once.
-    const reruns = o.reruns ?? 10;
-    let failed = 0;
-    for (let i = 0; i < reruns; i++) {
-      const r = await runTestFile(sandbox.root, f.testFile, { names: f.testNames, timeoutSec: 300, setup: o.setup });
-      if (r.cases.some((c) => c.status === "failed" && c.assertion)) failed++;
-    }
-    log(`test failed ${failed} of ${reruns} reruns`);
-    const test = reproTest(sandbox, f, { total: reruns, failed });
-    const rootCause = rootCauseOf(sandbox.root, f);
-    if (failed < reruns) {
-      return { ...base, status: "not_reproduced", rootCause, test, error: `The test is flaky: it failed ${failed} of ${reruns} runs.`, finishedAt: new Date().toISOString() };
-    }
+    // A test that fails at every commit it can run on, for a bug the reporter says used to work,
+    // almost certainly asserts something that was never true. Give the model one more round with
+    // that feedback before settling.
+    for (let round = 1; ; round++) {
+      let inv: InvestigateResult | undefined;
+      for (const tier of o.ladder ?? DEFAULT_LADDER) {
+        sandbox.cleanup();
+        log(`trying ${tier.model} (effort ${tier.effort}, up to $${tier.budgetUsd.toFixed(2)})`);
+        inv = await investigate(sandbox, bug, tier, { context, onEvent: (e) => log(`  ${e}`) });
+        usage.push(inv.usage);
+        log(`  ${inv.usage.requests} requests, ${inv.usage.inputTokens} in / ${inv.usage.outputTokens} out tokens, $${inv.usage.costUsd.toFixed(3)}`);
+        if (inv.ok) break;
+        log(`  ${inv.reason}`);
+      }
+      if (!inv?.ok) {
+        // A second round that finds nothing doesn't undo a valid first one.
+        return previous ?? { ...base, status: "not_reproduced", error: inv?.reason ?? "no models to try", finishedAt: new Date().toISOString() };
+      }
+      const f = inv.finding;
 
-    return await search({ ...base, status: "bisecting", rootCause, test }, f.files, f.testFile, f.testNames);
+      // The test has to fail every time, not just once.
+      const reruns = o.reruns ?? 10;
+      let failed = 0;
+      for (let i = 0; i < reruns; i++) {
+        const r = await runTestFile(sandbox.root, f.testFile, { names: f.testNames, timeoutSec: 300, setup: o.setup });
+        if (r.cases.some((c) => c.status === "failed" && c.assertion)) failed++;
+      }
+      log(`test failed ${failed} of ${reruns} reruns`);
+      const test = reproTest(sandbox, f, { total: reruns, failed });
+      const rootCause = rootCauseOf(sandbox.root, f);
+      if (failed < reruns) {
+        return previous ?? { ...base, status: "not_reproduced", rootCause, test, error: `The test is flaky: it failed ${failed} of ${reruns} runs.`, finishedAt: new Date().toISOString() };
+      }
+
+      const result = await search({ ...base, status: "bisecting", rootCause, test }, f.files, f.testFile, f.testNames);
+      if (result.status !== "not_regression" || round >= MAX_ROUNDS || !saysItUsedToWork(o.report.body)) return result;
+
+      previous = result;
+      const oldest = lastSearch?.status === "not-regression" ? lastSearch.oldestFailing : undefined;
+      log("the report says this used to work, but the test fails at every commit it can run on; trying again with that feedback");
+      context = [
+        o.context,
+        `A previous attempt blamed ${rootCause.file}:${rootCause.line} and wrote this test (${f.testFile}):\n\n${f.files.get(f.testFile)}\n\n` +
+          `That test fails at every older commit where it can run${oldest ? `, as far back as ${git(sandbox.root, "show", "-s", "--format=%h (%ad)", "--date=short", oldest)}` : ""}. ` +
+          `But the report says this used to work, so the test most likely asserts something that was never true, or tests a different problem. ` +
+          `Find what actually changed, and test the behavior that worked before.`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    }
   } catch (e) {
     return { ...base, status: "errored", error: (e as Error).message, finishedAt: new Date().toISOString() };
   } finally {
@@ -95,7 +129,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
   async function search(run: Run, files: Map<string, string>, testFile: string, testNames: string[]): Promise<Run> {
     progress(run);
     log("searching history");
-    const s = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, setup: o.setup, log: (l) => log(`  ${l}`) });
+    const s = (lastSearch = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, setup: o.setup, log: (l) => log(`  ${l}`) }));
     const finishedAt = new Date().toISOString();
     if (s.status === "found") return { ...run, status: "culprit_found", bisect: bisectOf(sandbox.root, s, o.repo), finishedAt };
     if (s.status === "not-regression") return { ...run, status: "not_regression", finishedAt };
@@ -132,7 +166,7 @@ function rootCauseOf(root: string, f: Finding): RootCause {
   } catch {
     // The file may not exist where the model said; the summary still stands.
   }
-  return { symbol, file, line, summary, path: f.path, ...(snippet ? { snippet } : {}) };
+  return { symbol, file, line, summary, path: f.path, ...(snippet ? { snippet } : {}), ...(f.fixDiff ? { suggestedFix: f.fixDiff, fixVerified: f.fixVerified } : {}) };
 }
 
 function commitOf(root: string, sha: string, repo: Repo): Commit {
@@ -154,5 +188,5 @@ function bisectOf(root: string, s: Extract<SearchResult, { status: "found" }>, r
     const patch = git(root, "show", "--format=", "--unified=3", s.culprit, "--", file);
     return { file, additions: Number(add) || 0, deletions: Number(del) || 0, patch: patch.split("\n").slice(4, 80).join("\n") };
   });
-  return { culprit: commitOf(root, s.culprit, repo), lastGood: commitOf(root, s.lastGood, repo), commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
+  return { culprit: commitOf(root, s.culprit, repo), lastGood: commitOf(root, s.lastGood, repo), evidence: s.evidence, commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
 }

@@ -116,7 +116,9 @@ function CulpritCard({ bisect }: { bisect: Bisect }) {
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center gap-2">
           <Badge tone="accent">Culprit</Badge>
-          <span className="text-xs text-muted">First commit where the test fails</span>
+          <span className="text-xs text-muted">
+            {bisect.evidence === "introduced" ? "Added the code the test covers, already failing" : "First commit where the test fails"}
+          </span>
         </div>
         <div className="font-mono text-[17px] leading-snug font-semibold tracking-[-0.01em]">{c.subject}</div>
         <div className="font-mono text-xs break-all text-muted">
@@ -146,7 +148,7 @@ function CulpritCard({ bisect }: { bisect: Bisect }) {
             <span className="size-2 rounded-full bg-pass" />
             {shortSha(bisect.lastGood.sha)}
           </span>
-          <span className="font-sans text-[11.5px] text-muted">passes</span>
+          <span className="font-sans text-[11.5px] text-muted">{bisect.evidence === "introduced" ? "code not there yet" : "passes"}</span>
           <span className="text-faint">→</span>
           <span className="flex items-center gap-1.5 text-accent-fg">
             <span className="size-2 rounded-full bg-accent" />

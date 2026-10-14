@@ -15,6 +15,9 @@ on:
       per_repo:
         description: "Max cases per repo when picking automatically"
         default: "3"
+      max_budget:
+        description: "Max model spend per model per case, in dollars"
+        default: "0.5"
 
 permissions:
   contents: read
@@ -49,6 +52,7 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       CASE_ID: ${{ matrix.id }}
+      MAX_BUDGET: ${{ inputs.max_budget }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -68,7 +72,7 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile --filter @trace/bench...
       - name: Run case
-        run: node bench/eval/case.ts --id "$CASE_ID" --work "$RUNNER_TEMP/trace" --out results --scripts
+        run: node bench/eval/case.ts --id "$CASE_ID" --work "$RUNNER_TEMP/trace" --out results --scripts --max-budget "$MAX_BUDGET"
       - name: Name the artifact
         if: always()
         run: echo "SLUG=$(echo "$CASE_ID" | tr '/#' '__')" >> "$GITHUB_ENV"

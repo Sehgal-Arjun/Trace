@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { nodeEnv } from "./node.ts";
 import { sh } from "./shell.ts";
 
 export type Runner = "vitest" | "jest";
@@ -92,7 +93,7 @@ export async function runTestFile(
     r.runner === "vitest"
       ? `${bin("vitest")} run ${JSON.stringify(rel)} --reporter=json --outputFile=${JSON.stringify(report)}`
       : `${bin("jest")} ${JSON.stringify(rel)} --ci --json --outputFile=${JSON.stringify(report)}`;
-  const res = await sh(cmd, r.pkgDir, { env: opts.env, timeoutSec: opts.timeoutSec ?? 600 });
+  const res = await sh(cmd, r.pkgDir, { env: { ...nodeEnv(root), ...opts.env }, timeoutSec: opts.timeoutSec ?? 600 });
   const output = res.out.slice(-20_000);
 
   if (!existsSync(report)) return { ran: false, cases: [], loadError: tail(res.out), output, seconds: seconds() };

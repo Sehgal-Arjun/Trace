@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { nodeEnv } from "./node.ts";
 import { git, sh } from "./shell.ts";
 import { runTestFile, type TestRun } from "./tests.ts";
 
@@ -157,7 +158,7 @@ export async function ensureInstalled(root: string, install?: string): Promise<s
   const marker = join(root, "node_modules", ".trace-lockfile");
   const key = lockKey(root);
   if (existsSync(marker) && readFileSync(marker, "utf8") === key) return null;
-  const r = await sh(install ?? defaultInstall(root), root, { timeoutSec: 1800 });
+  const r = await sh(install ?? defaultInstall(root), root, { env: nodeEnv(root), timeoutSec: 1800 });
   if (r.code !== 0) return `install failed: ${r.out.slice(-300)}`;
   mkdirSync(dirname(marker), { recursive: true });
   writeFileSync(marker, key);
@@ -184,11 +185,14 @@ function lockKey(root: string): string {
 }
 
 export function defaultInstall(root: string): string {
-  if (existsSync(join(root, "pnpm-lock.yaml"))) return "corepack pnpm install --frozen-lockfile --ignore-scripts || corepack pnpm install --ignore-scripts";
+  // Engine checks are relaxed: old commits often declare a narrower Node range than they need.
+  if (existsSync(join(root, "pnpm-lock.yaml"))) {
+    return "corepack pnpm install --frozen-lockfile --ignore-scripts --config.engine-strict=false || corepack pnpm install --ignore-scripts --config.engine-strict=false";
+  }
   if (existsSync(join(root, "yarn.lock"))) {
     return existsSync(join(root, ".yarnrc.yml"))
       ? "YARN_ENABLE_SCRIPTS=0 corepack yarn install --immutable || YARN_ENABLE_SCRIPTS=0 corepack yarn install"
-      : "corepack yarn install --frozen-lockfile --ignore-scripts";
+      : "corepack yarn install --frozen-lockfile --ignore-scripts --ignore-engines";
   }
   return "npm ci --ignore-scripts || npm install --ignore-scripts";
 }

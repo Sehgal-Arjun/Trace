@@ -98,7 +98,10 @@ export type Probe = {
 
 export type Bisect = {
   culprit: Commit;
+  /** The commit before the culprit. With evidence "introduced", the test couldn't run there. */
   lastGood: Commit;
+  /** "passed-before": the test passed at lastGood. "introduced": the tested code first appeared in the culprit, already failing. */
+  evidence?: "passed-before" | "introduced";
   /** Commits on first-parent history between lastGood and the starting commit. */
   commitsSearched: number;
   probes: Probe[];

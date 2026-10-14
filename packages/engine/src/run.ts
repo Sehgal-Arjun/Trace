@@ -188,5 +188,5 @@ function bisectOf(root: string, s: Extract<SearchResult, { status: "found" }>, r
     const patch = git(root, "show", "--format=", "--unified=3", s.culprit, "--", file);
     return { file, additions: Number(add) || 0, deletions: Number(del) || 0, patch: patch.split("\n").slice(4, 80).join("\n") };
   });
-  return { culprit: commitOf(root, s.culprit, repo), lastGood: commitOf(root, s.lastGood, repo), commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
+  return { culprit: commitOf(root, s.culprit, repo), lastGood: commitOf(root, s.lastGood, repo), evidence: s.evidence, commitsSearched: s.commitsSearched, probes, seconds: s.seconds, diff };
 }

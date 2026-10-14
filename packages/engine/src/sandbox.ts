@@ -129,10 +129,10 @@ export class Sandbox {
         if (!existsSync(abs)) return { ok: false, error: `no such file: ${rel}` };
         const current = readFileSync(abs, "utf8");
         if (!originals.has(rel)) originals.set(rel, current);
-        const at = current.indexOf(e.search);
-        if (!e.search || at === -1) return { ok: false, error: `the search text wasn't found in ${rel}; copy it exactly from the file` };
-        if (current.indexOf(e.search, at + 1) !== -1) return { ok: false, error: `the search text appears more than once in ${rel}; include more surrounding lines` };
-        writeFileSync(abs, current.slice(0, at) + e.replace + current.slice(at + e.search.length));
+        const span = locate(current, e.search);
+        if (span === "missing") return { ok: false, error: `the search text wasn't found in ${rel}; copy it from the file (read_file shows its exact lines)` };
+        if (span === "ambiguous") return { ok: false, error: `the search text appears more than once in ${rel}; include more surrounding lines` };
+        writeFileSync(abs, current.slice(0, span.start) + e.replace + current.slice(span.end));
       }
       const diff = git(this.root, "diff", "--", ...originals.keys());
       return { ok: true, diff, result: await fn() };
@@ -147,6 +147,33 @@ export class Sandbox {
     this.written.clear();
     this.lastRun = undefined;
   }
+}
+
+/**
+ * Finds `search` in `text`: exactly if possible, otherwise line by line ignoring each line's
+ * leading and trailing whitespace (models often get indentation slightly wrong). Must match once.
+ */
+export function locate(text: string, search: string): { start: number; end: number } | "missing" | "ambiguous" {
+  if (!search.trim()) return "missing";
+  const exact = text.indexOf(search);
+  if (exact !== -1) return text.indexOf(search, exact + 1) === -1 ? { start: exact, end: exact + search.length } : "ambiguous";
+
+  const want = search.split("\n").map((l) => l.trim());
+  while (want.length && !want[0]) want.shift();
+  while (want.length && !want[want.length - 1]) want.pop();
+  if (!want.length) return "missing";
+  const lines = text.split("\n");
+  const offsets: number[] = [];
+  lines.reduce((pos, l) => (offsets.push(pos), pos + l.length + 1), 0);
+  const hits: number[] = [];
+  for (let i = 0; i + want.length <= lines.length; i++) {
+    if (want.every((w, k) => lines[i + k].trim() === w)) hits.push(i);
+  }
+  if (hits.length === 0) return "missing";
+  if (hits.length > 1) return "ambiguous";
+  const first = hits[0];
+  const last = first + want.length - 1;
+  return { start: offsets[first], end: offsets[last] + lines[last].length };
 }
 
 export function describeRun(r: TestRun): string {

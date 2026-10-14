@@ -16,7 +16,18 @@ export type SearchProbe = {
 };
 
 export type SearchResult =
-  | { status: "found"; culprit: string; lastGood: string; probes: SearchProbe[]; commitsSearched: number; seconds: number; testNames: string[] }
+  | {
+      status: "found";
+      culprit: string;
+      /** The commit just before the culprit: the test passed there, or couldn't run because the code it tests didn't exist yet. */
+      lastGood: string;
+      /** "passed-before": the test passed at lastGood. "introduced": the tested code first appeared in the culprit, already failing. */
+      evidence: "passed-before" | "introduced";
+      probes: SearchProbe[];
+      commitsSearched: number;
+      seconds: number;
+      testNames: string[];
+    }
   | { status: "not-regression"; probes: SearchProbe[]; oldestFailing: string; seconds: number }
   | { status: "inconclusive"; reason: string; probes: SearchProbe[]; seconds: number };
 
@@ -114,6 +125,13 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
         else if (out === "fail") lo = bad = mid;
         else hi = mid;
       }
+      // The test fails at `lo` and can't run one commit earlier. If that's because the code it
+      // tests didn't exist yet (not an install problem), `lo` is where the buggy code came in.
+      const before = probes.find((p) => p.index === hi);
+      const codeAbsent = before?.outcome === "skip" && !/^(install|prepare) failed/.test(before.reason ?? "");
+      if (good === -1 && hi - lo === 1 && (lo === 0 || probes.some((p) => p.index === lo && p.outcome === "fail")) && codeAbsent) {
+        return { status: "found", culprit: history[lo], lastGood: history[hi], evidence: "introduced", probes, commitsSearched: hi, seconds: elapsed(), testNames: [...focus] };
+      }
       break;
     }
     if (good === -1) {
@@ -141,7 +159,7 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     if (hi - lo > 1) {
       return { status: "inconclusive", reason: `couldn't run the test on commits between ${history[hi].slice(0, 9)} and ${history[lo].slice(0, 9)}`, probes, seconds: elapsed() };
     }
-    return { status: "found", culprit: history[lo], lastGood: history[hi], probes, commitsSearched: good, seconds: elapsed(), testNames: [...focus] };
+    return { status: "found", culprit: history[lo], lastGood: history[hi], evidence: "passed-before", probes, commitsSearched: good, seconds: elapsed(), testNames: [...focus] };
   } finally {
     checkout(o.root, o.start, o.files);
     await ensureInstalled(o.root, o.setup);

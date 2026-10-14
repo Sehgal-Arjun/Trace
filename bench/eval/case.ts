@@ -16,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Run } from "@trace/core";
-import { ensureInstalled, findCulprit, git, runTestFile, trace, tryGit, type SearchResult, type Setup } from "@trace/engine";
+import { DEFAULT_LADDER, ensureInstalled, findCulprit, git, runTestFile, trace, tryGit, type SearchResult, type Setup } from "@trace/engine";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const envFile = join(HERE, "..", "..", "packages", "engine", ".env");
@@ -67,8 +67,12 @@ const { values } = parseArgs({
     out: { type: "string", default: join(HERE, "..", "data", "eval") },
     checkout: { type: "string" },
     scripts: { type: "boolean", default: false },
+    // Caps the last (most expensive) model in the ladder, to bound what a whole eval can cost.
+    "max-budget": { type: "string" },
   },
 });
+const maxBudget = values["max-budget"] ? Number(values["max-budget"]) : undefined;
+const ladder = DEFAULT_LADDER.map((t) => (maxBudget !== undefined ? { ...t, budgetUsd: Math.min(t.budgetUsd, maxBudget) } : t));
 if (!values.id) {
   console.error("usage: node bench/eval/case.ts --id owner/repo#123");
   process.exit(2);
@@ -113,6 +117,7 @@ try {
     repo: { owner: c.repo.split("/")[0], name: c.repo.split("/")[1], defaultBranch: "main" },
     report: { title: c.report.title, body: c.report.body, source: { kind: "manual" }, attachments: [], createdAt: new Date().toISOString() },
     setup,
+    ladder,
     log: (l) => log(`trace: ${l}`),
   });
   writeFileSync(join(outDir, `${slug}.run.json`), JSON.stringify(run, null, 2));

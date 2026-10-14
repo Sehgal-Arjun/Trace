@@ -166,7 +166,7 @@ function rootCauseOf(root: string, f: Finding): RootCause {
   } catch {
     // The file may not exist where the model said; the summary still stands.
   }
-  return { symbol, file, line, summary, path: f.path, ...(snippet ? { snippet } : {}), ...(f.fixDiff ? { suggestedFix: f.fixDiff } : {}) };
+  return { symbol, file, line, summary, path: f.path, ...(snippet ? { snippet } : {}), ...(f.fixDiff ? { suggestedFix: f.fixDiff, fixVerified: f.fixVerified } : {}) };
 }
 
 function commitOf(root: string, sha: string, repo: Repo): Commit {

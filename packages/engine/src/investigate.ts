@@ -18,8 +18,10 @@ export type Finding = {
   /** The tests in testFile that reproduce the bug (they fail at HEAD on an assertion). */
   testNames: string[];
   files: Map<string, string>;
-  /** Unified diff of the fix the agent proposed; the test passed with it applied. */
+  /** Unified diff of the fix the agent proposed. */
   fixDiff: string;
+  /** The test passed with the fix applied. */
+  fixVerified: boolean;
   headRun: TestRun;
 };
 
@@ -58,6 +60,10 @@ export async function investigate(
   const usage: Usage = { model: tier.model, inputTokens: 0, outputTokens: 0, requests: 0, costUsd: 0 };
   let finding: Finding | null = null;
   let submits = 0;
+  // Fixing a bug is harder than finding it. After this many fixes that don't make the test pass,
+  // a test that reproduces the bug is accepted anyway, marked as unverified.
+  const MAX_FIX_REJECTIONS = 2;
+  let fixRejections = 0;
 
   // Tool errors go back to the model as text so it can recover.
   const guard =
@@ -186,7 +192,14 @@ export async function investigate(
         );
         if (!withFix.ok) return `Not accepted: your fix couldn't be applied: ${withFix.error}. Fix it and submit again.`;
         const stillFailing = withFix.result.cases.filter((c) => c.status !== "passed");
-        if (!withFix.result.ran || stillFailing.length) {
+        const verified = withFix.result.ran && stillFailing.length === 0;
+        if (!verified && fixRejections >= MAX_FIX_REJECTIONS) {
+          finding = { rootCause: a.root_cause, path: a.path, testFile, testNames: names, files: new Map(sandbox.written), headRun: run, fixDiff: withFix.diff, fixVerified: false };
+          log(`  accepted without a working fix after ${fixRejections} tries`);
+          return "Accepted (your fix didn't make the test pass, so the diagnosis is marked unverified). You're done; reply with a one-line summary.";
+        }
+        if (!verified) {
+          fixRejections++;
           return [
             `Not accepted: with your fix applied, the test still doesn't pass.`,
             describeRun(withFix.result),
@@ -201,6 +214,7 @@ export async function investigate(
           files: new Map(sandbox.written),
           headRun: run,
           fixDiff: withFix.diff,
+          fixVerified: true,
         };
         log(`  fix checked: test fails without it, passes with it`);
         return "Accepted. You're done; reply with a one-line summary.";

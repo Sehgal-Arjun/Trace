@@ -59,6 +59,8 @@ export type RootCause = {
   snippet?: { startLine: number; code: string; highlightLine?: number; note?: string };
   /** The minimal fix the agent proposed to prove its diagnosis (unified diff). Never committed. */
   suggestedFix?: string;
+  /** Whether the test passed with suggestedFix applied. False when the model couldn't produce a fix that works. */
+  fixVerified?: boolean;
   path: TraceHop[];
   downstream?: { title: string; note: string }[];
 };

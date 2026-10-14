@@ -1,7 +1,7 @@
 import type { Bisect, Commit, Probe, Repo, Report, ReproTest, RootCause, Run } from "@trace/core";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { findCulprit, type SearchResult } from "./bisect.ts";
+import { ensureInstalled, findCulprit, type SearchResult } from "./bisect.ts";
 import { investigate, type BugReport, type Finding, type InvestigateResult, type Usage } from "./investigate.ts";
 import { DEFAULT_LADDER, type Tier } from "./models.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -49,6 +49,10 @@ export async function trace(o: TraceOptions): Promise<Run> {
       return await search({ ...base, ...saved, commit: sandbox.head, status: "bisecting" }, files, saved.test.file, saved.test.names);
     }
     progress(base);
+    // Dependencies must match this commit before any test runs; an interrupted search can leave
+    // another commit's node_modules behind.
+    const installError = await ensureInstalled(sandbox.root, o.install);
+    if (installError) return { ...base, status: "errored", error: installError, finishedAt: new Date().toISOString() };
     log(`investigating at ${sandbox.head.slice(0, 9)}`);
     const bug: BugReport = { title: o.report.title, body: o.report.body };
     const usage: Usage[] = [];

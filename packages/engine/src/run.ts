@@ -20,6 +20,10 @@ export type TraceOptions = {
   ladder?: Tier[];
   /** Direction from a person, e.g. an "@trace that's not it, …" correction. */
   context?: string;
+  /** A run saved partway: if it has an accepted test, skip straight to the history search. */
+  resume?: Run;
+  /** Called whenever the run reaches a new stage, so it can be saved and shown. */
+  onProgress?: (run: Run) => void;
   log?: (line: string) => void;
 };
 
@@ -27,10 +31,24 @@ export type TraceOptions = {
 export async function trace(o: TraceOptions): Promise<Run> {
   const log = o.log ?? (() => {});
   const startedAt = new Date().toISOString();
+  // A resumed run may find the checkout wherever an interrupted search left it.
+  if (o.resume?.commit) {
+    git(o.root, "reset", "--hard", "--quiet");
+    git(o.root, "clean", "-fdq", "-e", "node_modules", "-e", "**/node_modules");
+    git(o.root, "checkout", "--quiet", "--detach", o.resume.commit);
+  }
   const sandbox = new Sandbox(o.root);
-  const base: Run = { id: o.id, repo: o.repo, report: o.report, status: "tracing", startedAt };
+  const base: Run = { id: o.id, repo: o.repo, commit: sandbox.head, report: o.report, status: "tracing", startedAt };
+  const progress = o.onProgress ?? (() => {});
 
   try {
+    const saved = o.resume;
+    if (saved?.test?.names?.length && saved.rootCause) {
+      log(`resuming with the saved test ${saved.test.file}`);
+      const files = new Map([[saved.test.file, saved.test.code], ...(saved.test.fixtures ?? []).map((f) => [f.file, f.code] as [string, string])]);
+      return await search({ ...base, ...saved, commit: sandbox.head, status: "bisecting" }, files, saved.test.file, saved.test.names);
+    }
+    progress(base);
     log(`investigating at ${sandbox.head.slice(0, 9)}`);
     const bug: BugReport = { title: o.report.title, body: o.report.body };
     const usage: Usage[] = [];
@@ -62,26 +80,21 @@ export async function trace(o: TraceOptions): Promise<Run> {
       return { ...base, status: "not_reproduced", rootCause, test, error: `The test is flaky: it failed ${failed} of ${reruns} runs.`, finishedAt: new Date().toISOString() };
     }
 
-    log("searching history");
-    const search = await findCulprit({
-      root: sandbox.root,
-      start: sandbox.head,
-      files: f.files,
-      testFile: f.testFile,
-      testNames: f.testNames,
-      install: o.install,
-      log: (l) => log(`  ${l}`),
-    });
-    const finishedAt = new Date().toISOString();
-    if (search.status === "found") {
-      return { ...base, status: "culprit_found", rootCause, test, bisect: bisectOf(sandbox.root, search), finishedAt };
-    }
-    if (search.status === "not-regression") return { ...base, status: "not_regression", rootCause, test, finishedAt };
-    return { ...base, status: "errored", rootCause, test, error: search.reason, finishedAt };
+    return await search({ ...base, status: "bisecting", rootCause, test }, f.files, f.testFile, f.testNames);
   } catch (e) {
     return { ...base, status: "errored", error: (e as Error).message, finishedAt: new Date().toISOString() };
   } finally {
     sandbox.cleanup();
+  }
+
+  async function search(run: Run, files: Map<string, string>, testFile: string, testNames: string[]): Promise<Run> {
+    progress(run);
+    log("searching history");
+    const s = await findCulprit({ root: sandbox.root, start: sandbox.head, files, testFile, testNames, install: o.install, log: (l) => log(`  ${l}`) });
+    const finishedAt = new Date().toISOString();
+    if (s.status === "found") return { ...run, status: "culprit_found", bisect: bisectOf(sandbox.root, s), finishedAt };
+    if (s.status === "not-regression") return { ...run, status: "not_regression", finishedAt };
+    return { ...run, status: "errored", error: s.reason, finishedAt };
   }
 }
 
@@ -91,6 +104,7 @@ function reproTest(sandbox: Sandbox, f: Finding, runs: { total: number; failed: 
   return {
     file: f.testFile,
     code: f.files.get(f.testFile) ?? "",
+    names: f.testNames,
     runner,
     command: testCommand(sandbox.root, f.testFile) ?? `npx ${runner} ${f.testFile}`,
     ...(fixtures.length ? { fixtures } : {}),

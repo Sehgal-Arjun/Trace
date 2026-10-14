@@ -64,6 +64,8 @@ export type RootCause = {
 export type ReproTest = {
   file: string;
   code: string;
+  /** Full names of the tests in the file that reproduce the bug. */
+  names?: string[];
   runner: "vitest" | "jest";
   command: string;
   fixtures?: { file: string; code: string; note?: string }[];
@@ -133,6 +135,8 @@ export type Attempt = {
 export type Run = {
   id: string; // short human id, e.g. "BUG-218"
   repo: Repo;
+  /** The commit Trace investigated: where the report was filed. */
+  commit?: string;
   status: RunStatus;
   report: Report;
   rootCause?: RootCause;

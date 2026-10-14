@@ -59,7 +59,8 @@ export function git(cwd: string, ...args: string[]): string {
 /** Like git() but returns null instead of throwing on a non-zero exit. */
 export function tryGit(cwd: string, ...args: string[]): string | null {
   try {
-    return git(cwd, ...args);
+    // Quiet: a failure here is an answer ("not tracked", "not an ancestor"), not an error to print.
+    return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     return null;
   }

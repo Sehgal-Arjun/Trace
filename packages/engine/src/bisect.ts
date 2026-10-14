@@ -61,7 +61,7 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     const done = (outcome: Outcome, reason?: string) => {
       const p: SearchProbe = { sha, index, outcome, seconds: Math.round((Date.now() - p0) / 100) / 10, ...(reason ? { reason } : {}) };
       probes.push(p);
-      log(`${label.padEnd(18)} ${sha.slice(0, 9)} → ${outcome}${reason ? ` (${reason.slice(0, 160).replace(/\s+/g, " ")})` : ""}`);
+      log(`${label.padEnd(18)} ${sha.slice(0, 9)} → ${outcome}${reason ? ` (${reason.replace(/\s+/g, " ").trim().slice(-160)})` : ""}`);
       return outcome;
     };
 

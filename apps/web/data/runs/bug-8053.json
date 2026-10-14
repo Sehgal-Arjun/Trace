@@ -1,0 +1,429 @@
+{
+  "id": "BUG-8053",
+  "repo": {
+    "owner": "actualbudget",
+    "name": "actual",
+    "defaultBranch": "main"
+  },
+  "commit": "4aad1489d7abc71ef1049daba5a870d26802ff91",
+  "report": {
+    "title": "Live spending reports stopped updating",
+    "body": "I have spending report cards on my dashboard set to Live, and they used to switch to the new month automatically when the month changed. Now they stay stuck on the month they were created in, like a static report. My Net Worth and other report cards still update fine.",
+    "source": {
+      "kind": "manual"
+    },
+    "attachments": [],
+    "createdAt": "2026-10-14T15:05:40.763Z"
+  },
+  "status": "culprit_found",
+  "startedAt": "2026-10-14T15:05:40.763Z",
+  "usage": [
+    {
+      "model": "claude-haiku-5-5",
+      "inputTokens": 266688,
+      "outputTokens": 6727,
+      "requests": 14,
+      "costUsd": 0.009029520000000001
+    }
+  ],
+  "rootCause": {
+    "symbol": "calculateSpendingReportTimeRange({ compare, compareTo, isLive, mode })",
+    "file": "packages/desktop-client/src/components/reports/reportRanges.ts",
+    "line": 363,
+    "summary": "For a live single-month spending report with a saved `compare` month, this branch returns the saved month verbatim instead of the current month, so a Live dashboard card never slides to the new month. The branch was added in 2c3e2a34f to preserve saved selections in the editor, but `SpendingCard` also calls this function with the card's saved meta, so Live cards are frozen on their creation month.",
+    "path": [
+      {
+        "layer": "ui",
+        "title": "SpendingCard (dashboard card)",
+        "location": "packages/desktop-client/src/components/reports/reports/SpendingCard.tsx:54",
+        "value": "calls calculateSpendingReportTimeRange(meta) with the saved meta"
+      },
+      {
+        "layer": "client",
+        "title": "calculateSpendingReportTimeRange(meta)",
+        "location": "packages/desktop-client/src/components/reports/reportRanges.ts:363",
+        "value": "live + single-month + saved compare '2016-12' returns '2016-12' instead of the current month '2017-01'"
+      }
+    ],
+    "snippet": {
+      "startLine": 359,
+      "code": "    const month = compare ?? monthUtils.currentMonth();\n    return [month, month];\n  }\n\n  if (mode === 'single-month' && isLive && compare) {\n    return [compare, compareTo ?? monthUtils.subMonths(compare, 1)];\n  }\n\n  const [start, end] = calculateTimeRange(",
+      "highlightLine": 363
+    }
+  },
+  "test": {
+    "file": "packages/desktop-client/src/components/reports/reportRangesLive.test.ts",
+    "code": "import { describe, expect, it } from 'vitest';\n\nimport { calculateSpendingReportTimeRange } from './reportRanges';\n\n// In test mode, monthUtils.currentMonth() returns '2017-01'\ndescribe('calculateSpendingReportTimeRange live dashboard cards', () => {\n  it('moves a live single-month spending card to the current month', () => {\n    // Card was created while viewing 2016-12; it is Live, so it should\n    // switch to the current month (2017-01) instead of staying on 2016-12.\n    const [compare] = calculateSpendingReportTimeRange({\n      compare: '2016-12',\n      compareTo: '2016-11',\n      isLive: true,\n      mode: 'single-month',\n    });\n\n    expect(compare).toBe('2017-01');\n  });\n});\n",
+    "names": [
+      "calculateSpendingReportTimeRange live dashboard cards moves a live single-month spending card to the current month"
+    ],
+    "runner": "vitest",
+    "command": "npx vitest run packages/desktop-client/src/components/reports/reportRangesLive.test.ts",
+    "runs": {
+      "total": 10,
+      "failed": 10
+    },
+    "output": "FAIL calculateSpendingReportTimeRange live dashboard cards moves a live single-month spending card to the current month\nAssertionError: expected '2016-12' to be '2017-01' // Object.is equality\n    at /Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/packages/desktop-client/src/components/reports/reportRangesLive.test.ts:17:21\n    at file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:1628:35\n    at file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:2783:26\n    at file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:3314:10)\n    at file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:3257:10)\n    at file:///Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/node_modules/vitest/dist/chunks/run.CQOUYP-x.js:3876:64"
+  },
+  "bisect": {
+    "culprit": {
+      "sha": "2c3e2a34fd34165bdcb94ac2bc703387588c3887",
+      "subject": "Fix/spending report date range save (#7672)",
+      "author": "Aurora-Flipped",
+      "email": "1689454546@qq.com",
+      "date": "2026-05-05T04:28:19+08:00",
+      "pr": {
+        "number": 7672,
+        "title": "Fix/spending report date range save",
+        "url": "https://github.com/actualbudget/actual/pull/7672"
+      }
+    },
+    "lastGood": {
+      "sha": "78d533c80072160394b401fa302a9553f6bb7a91",
+      "subject": "Bank sync page refactor (#7449)",
+      "author": "lelemm",
+      "email": "lelemm@gmail.com",
+      "date": "2026-05-04T11:51:33-03:00",
+      "pr": {
+        "number": 7449,
+        "title": "Bank sync page refactor",
+        "url": "https://github.com/actualbudget/actual/pull/7449"
+      }
+    },
+    "commitsSearched": 1253,
+    "probes": [
+      {
+        "commit": {
+          "sha": "8e165c0eb6871f05177e0aa8589894c783ef122e",
+          "subject": "[AI] Implement standard sizes on Button, Text and Input components (#9002)",
+          "author": "flafleur",
+          "email": "15882676+flafleur@users.noreply.github.com",
+          "date": "2026-10-05T16:41:38Z",
+          "pr": {
+            "number": 9002,
+            "title": "[AI] Implement standard sizes on Button, Text and Input components",
+            "url": "https://github.com/actualbudget/actual/pull/9002"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 1.5,
+        "index": 8
+      },
+      {
+        "commit": {
+          "sha": "74ae62609476e3adfb2cfc079a8971a241a13bf7",
+          "subject": "fix yarn publish warning (#9073)",
+          "author": "Matt Fiddaman",
+          "email": "github@m.fiddaman.uk",
+          "date": "2026-10-02T15:58:48Z",
+          "pr": {
+            "number": 9073,
+            "title": "fix yarn publish warning",
+            "url": "https://github.com/actualbudget/actual/pull/9073"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 5.2,
+        "index": 32
+      },
+      {
+        "commit": {
+          "sha": "81f391700b975b57d75c997140dd08c0a389d0ea",
+          "subject": "[AI] docs(migration): explain nYNAB credit card payment overbudgeting in To Budget (#8784)",
+          "author": "Stephen Brown II",
+          "email": "Stephen.Brown2@gmail.com",
+          "date": "2026-08-24T14:59:58Z",
+          "pr": {
+            "number": 8784,
+            "title": "[AI] docs(migration): explain nYNAB credit card payment overbudgeting in To Budget",
+            "url": "https://github.com/actualbudget/actual/pull/8784"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 5.1,
+        "index": 128
+      },
+      {
+        "commit": {
+          "sha": "751a597eee1334dff047a79defcee2d008b6acb2",
+          "subject": "Correct handling of negative budgeting and \"positive\" spending in Sankey chart (#7903)",
+          "author": "Emil Tveden Bjerglund",
+          "email": "emilbp@gmail.com",
+          "date": "2026-05-19T21:49:01+02:00",
+          "pr": {
+            "number": 7903,
+            "title": "Correct handling of negative budgeting and \"positive\" spending in Sankey chart",
+            "url": "https://github.com/actualbudget/actual/pull/7903"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 23.5,
+        "index": 512
+      },
+      {
+        "commit": {
+          "sha": "0cc817f2ef2dc1ee08b74e6f599bcd38cdde8fdd",
+          "subject": "[Redux Toolkit Migration] usersSlice [Final PR] (#4128)",
+          "author": "Joel Jeremy Marquez",
+          "email": "joeljeremy.marquez@gmail.com",
+          "date": "2025-03-16T21:51:58-07:00",
+          "pr": {
+            "number": 4128,
+            "title": "[Redux Toolkit Migration] usersSlice [Final PR]",
+            "url": "https://github.com/actualbudget/actual/pull/4128"
+          }
+        },
+        "outcome": "skip",
+        "seconds": 13.4,
+        "index": 2000,
+        "reason": "(node:76889) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.\n(Use `node --trace-deprecation ...` to show where the warning was created)\nJSON report written to /Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/.trace-report.json\n"
+      },
+      {
+        "commit": {
+          "sha": "9f9f349cbffc5dce3f551e75760977fcb1657db7",
+          "subject": ":recycle: (api) do not bundle test files in package output (#4640)",
+          "author": "Matiss Janis Aboltins",
+          "email": "matiss@mja.lv",
+          "date": "2025-03-17T17:21:09Z",
+          "pr": {
+            "number": 4640,
+            "title": ":recycle: (api) do not bundle test files in package output",
+            "url": "https://github.com/actualbudget/actual/pull/4640"
+          }
+        },
+        "outcome": "skip",
+        "seconds": 1,
+        "index": 1998,
+        "reason": "(node:76935) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.\n(Use `node --trace-deprecation ...` to show where the warning was created)\nJSON report written to /Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/.trace-report.json\n"
+      },
+      {
+        "commit": {
+          "sha": "c8813e995362d776dea7adadd13dd71f5277a286",
+          "subject": "Extract budget category related server handlers from main.ts to server/budget/app.ts (#4442)",
+          "author": "Joel Jeremy Marquez",
+          "email": "joeljeremy.marquez@gmail.com",
+          "date": "2025-03-17T21:39:10-07:00",
+          "pr": {
+            "number": 4442,
+            "title": "Extract budget category related server handlers from main.ts to server/budget/app.ts",
+            "url": "https://github.com/actualbudget/actual/pull/4442"
+          }
+        },
+        "outcome": "skip",
+        "seconds": 2,
+        "index": 1996,
+        "reason": "(node:76986) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.\n(Use `node --trace-deprecation ...` to show where the warning was created)\nJSON report written to /Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/.trace-report.json\n"
+      },
+      {
+        "commit": {
+          "sha": "b5cbaa52b236c358c4492528a8e4b3752b79bb8c",
+          "subject": "Simplify Modals component by destructuring modal.options instead of passing options one by one (#4647)",
+          "author": "Joel Jeremy Marquez",
+          "email": "joeljeremy.marquez@gmail.com",
+          "date": "2025-03-18T06:43:01-07:00",
+          "pr": {
+            "number": 4647,
+            "title": "Simplify Modals component by destructuring modal.options instead of passing options one by one",
+            "url": "https://github.com/actualbudget/actual/pull/4647"
+          }
+        },
+        "outcome": "skip",
+        "seconds": 0.7,
+        "index": 1994,
+        "reason": "(node:77025) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.\n(Use `node --trace-deprecation ...` to show where the warning was created)\nJSON report written to /Users/arjun/GitHub/Trace/bench/.cache/work/actualbudget__actual/.trace-report.json\n"
+      },
+      {
+        "commit": {
+          "sha": "64bc7dbf6ef64a50325d964317ab22a79653f762",
+          "subject": ":robot: Adding path filters so workflows only run when required (#6364)",
+          "author": "Michael Clark",
+          "email": "5285928+MikesGlitch@users.noreply.github.com",
+          "date": "2025-12-11T19:20:36Z",
+          "pr": {
+            "number": 6364,
+            "title": ":robot: Adding path filters so workflows only run when required",
+            "url": "https://github.com/actualbudget/actual/pull/6364"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 12.7,
+        "index": 1253
+      },
+      {
+        "commit": {
+          "sha": "f29c03173552a93a653bada6892a11407b4066dd",
+          "subject": "Add an option to swap payee/memo when importing transaction form file (#7101)",
+          "author": "Sylvercode",
+          "email": "987564+sylvercode@users.noreply.github.com",
+          "date": "2026-03-11T09:40:26-04:00",
+          "pr": {
+            "number": 7101,
+            "title": "Add an option to swap payee/memo when importing transaction form file",
+            "url": "https://github.com/actualbudget/actual/pull/7101"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 8.2,
+        "index": 882
+      },
+      {
+        "commit": {
+          "sha": "89b442bc745d0f25cc2e6e5cddd634c48553b6fd",
+          "subject": "fix runImport failing when ACTUAL_DATA_DIR environment variable is not set (#7522)",
+          "author": "Matt Fiddaman",
+          "email": "github@m.fiddaman.uk",
+          "date": "2026-04-16T10:40:43+01:00",
+          "pr": {
+            "number": 7522,
+            "title": "fix runImport failing when ACTUAL_DATA_DIR environment variable is not set",
+            "url": "https://github.com/actualbudget/actual/pull/7522"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 8.2,
+        "index": 697
+      },
+      {
+        "commit": {
+          "sha": "852b95524b5654e80638344aecb510e6735cdcd7",
+          "subject": "[AI] Revert crypto.randomUUID back to uuid library (#7734)",
+          "author": "Matiss Janis Aboltins",
+          "email": "matiss@mja.lv",
+          "date": "2026-05-07T20:18:47+01:00",
+          "pr": {
+            "number": 7734,
+            "title": "[AI] Revert crypto.randomUUID back to uuid library",
+            "url": "https://github.com/actualbudget/actual/pull/7734"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 13,
+        "index": 604
+      },
+      {
+        "commit": {
+          "sha": "686f10247d43103655d710f020eee035b68af072",
+          "subject": "Enhance Sankey chart datamodel, show income and allow layer filtering (#7582)",
+          "author": "Emil Tveden Bjerglund",
+          "email": "emilbp@gmail.com",
+          "date": "2026-04-24T20:20:15+02:00",
+          "pr": {
+            "number": 7582,
+            "title": "Enhance Sankey chart datamodel, show income and allow layer filtering",
+            "url": "https://github.com/actualbudget/actual/pull/7582"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 2.6,
+        "index": 650
+      },
+      {
+        "commit": {
+          "sha": "4a5ee9c2dc0f683e71d2dbd69ba07d24e75b15be",
+          "subject": "[AI] Make TypeScript work in test files across packages (#7642)",
+          "author": "Matiss Janis Aboltins",
+          "email": "matiss@mja.lv",
+          "date": "2026-04-29T18:06:58+01:00",
+          "pr": {
+            "number": 7642,
+            "title": "[AI] Make TypeScript work in test files across packages",
+            "url": "https://github.com/actualbudget/actual/pull/7642"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 12.6,
+        "index": 627
+      },
+      {
+        "commit": {
+          "sha": "2c3e2a34fd34165bdcb94ac2bc703387588c3887",
+          "subject": "Fix/spending report date range save (#7672)",
+          "author": "Aurora-Flipped",
+          "email": "1689454546@qq.com",
+          "date": "2026-05-05T04:28:19+08:00",
+          "pr": {
+            "number": 7672,
+            "title": "Fix/spending report date range save",
+            "url": "https://github.com/actualbudget/actual/pull/7672"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 11.3,
+        "index": 615
+      },
+      {
+        "commit": {
+          "sha": "c593bda14592f3fa6c560b1bd2d240dc85cee341",
+          "subject": "Update release docs to reflect latest process (#7690)",
+          "author": "Julian Dominguez-Schatz",
+          "email": "julian.dominguezschatz@gmail.com",
+          "date": "2026-05-03T18:02:08-04:00",
+          "pr": {
+            "number": 7690,
+            "title": "Update release docs to reflect latest process",
+            "url": "https://github.com/actualbudget/actual/pull/7690"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 11.3,
+        "index": 621
+      },
+      {
+        "commit": {
+          "sha": "9f05207fe8fc8c0e4c9283d811aa8741110a34f0",
+          "subject": "Fix Cover Overspending menu closing when view too narrow (#7687)",
+          "author": "Emil Tveden Bjerglund",
+          "email": "emilbp@gmail.com",
+          "date": "2026-05-04T16:48:30+02:00",
+          "pr": {
+            "number": 7687,
+            "title": "Fix Cover Overspending menu closing when view too narrow",
+            "url": "https://github.com/actualbudget/actual/pull/7687"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 11.2,
+        "index": 618
+      },
+      {
+        "commit": {
+          "sha": "78d533c80072160394b401fa302a9553f6bb7a91",
+          "subject": "Bank sync page refactor (#7449)",
+          "author": "lelemm",
+          "email": "lelemm@gmail.com",
+          "date": "2026-05-04T11:51:33-03:00",
+          "pr": {
+            "number": 7449,
+            "title": "Bank sync page refactor",
+            "url": "https://github.com/actualbudget/actual/pull/7449"
+          }
+        },
+        "outcome": "pass",
+        "seconds": 11.3,
+        "index": 616
+      }
+    ],
+    "seconds": 155,
+    "diff": [
+      {
+        "file": "packages/desktop-client/src/components/reports/reportRanges.ts",
+        "additions": 6,
+        "deletions": 1,
+        "patch": "@@ -249,7 +249,12 @@ export function calculateSpendingReportTimeRange({\n   mode?: 'budget' | 'average' | 'single-month';\n }): [string, string] {\n   if (['budget', 'average'].includes(mode) && isLive) {\n-    return [monthUtils.currentMonth(), monthUtils.currentMonth()];\n+    const month = compare ?? monthUtils.currentMonth();\n+    return [month, month];\n+  }\n+\n+  if (mode === 'single-month' && isLive && compare) {\n+    return [compare, compareTo ?? monthUtils.subMonths(compare, 1)];\n   }\n \n   const [start, end] = calculateTimeRange("
+      },
+      {
+        "file": "upcoming-release-notes/7672.md",
+        "additions": 6,
+        "deletions": 0,
+        "patch": "+++ b/upcoming-release-notes/7672.md\n@@ -0,0 +1,6 @@\n+---\n+category: Bugfixes\n+authors: [Aurora-Flipped]\n+---\n+\n+Fixed Spending reports not preserving saved date range selections."
+      },
+      {
+        "file": "packages/desktop-client/src/components/reports/reportRanges.test.ts",
+        "additions": 50,
+        "deletions": 0,
+        "patch": "+++ b/packages/desktop-client/src/components/reports/reportRanges.test.ts\n@@ -0,0 +1,50 @@\n+import { describe, expect, it } from 'vitest';\n+\n+import { calculateSpendingReportTimeRange } from './reportRanges';\n+\n+// In test mode, monthUtils.currentMonth() returns '2017-01'\n+describe('calculateSpendingReportTimeRange', () => {\n+  it('preserves the saved compare month for live average reports', () => {\n+    const [compare, compareTo] = calculateSpendingReportTimeRange({\n+      compare: '2016-12',\n+      isLive: true,\n+      mode: 'average',\n+    });\n+\n+    expect(compare).toBe('2016-12');\n+    expect(compareTo).toBe('2016-12');\n+  });\n+\n+  it('preserves the saved compare month for live budget reports', () => {\n+    const [compare, compareTo] = calculateSpendingReportTimeRange({\n+      compare: '2016-12',\n+      isLive: true,\n+      mode: 'budget',\n+    });\n+\n+    expect(compare).toBe('2016-12');\n+    expect(compareTo).toBe('2016-12');\n+  });\n+\n+  it('preserves the saved compare months for live single month reports', () => {\n+    const [compare, compareTo] = calculateSpendingReportTimeRange({\n+      compare: '2016-12',\n+      compareTo: '2016-11',\n+      isLive: true,\n+      mode: 'single-month',\n+    });\n+\n+    expect(compare).toBe('2016-12');\n+    expect(compareTo).toBe('2016-11');\n+  });\n+\n+  it('defaults live average reports to the current month without a saved compare month', () => {\n+    const [compare, compareTo] = calculateSpendingReportTimeRange({\n+      isLive: true,\n+      mode: 'average',\n+    });\n+\n+    expect(compare).toBe('2017-01');\n+    expect(compareTo).toBe('2017-01');\n+  });\n+});"
+      }
+    ]
+  },
+  "finishedAt": "2026-10-14T15:09:41.359Z"
+}

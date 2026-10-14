@@ -1,0 +1,354 @@
+{
+  "id": "BUG-218",
+  "repo": {
+    "owner": "acme",
+    "name": "shop-web",
+    "defaultBranch": "main",
+    "language": "TypeScript",
+    "testRunner": "vitest"
+  },
+  "status": "pr_opened",
+  "report": {
+    "title": "Clicking Save empties the cart",
+    "body": "Customer (Zendesk #48213): added two tees and a wool cap, applied SPRING15, then clicked “Save cart”. The page came back with an empty cart. Happens every time a promo code is applied.",
+    "reporter": "Jordan Lee",
+    "source": {
+      "kind": "linear",
+      "issueId": "ENG-218",
+      "url": "https://linear.app/acme/issue/ENG-218"
+    },
+    "attachments": [
+      {
+        "kind": "video",
+        "name": "save-empties-cart.webm",
+        "url": "#",
+        "meta": "0:42 · 1920×1080 · 18.4 MB"
+      },
+      {
+        "kind": "har",
+        "name": "shop.acme.com.har",
+        "url": "#",
+        "meta": "38 requests · 412 KB"
+      },
+      {
+        "kind": "log",
+        "name": "console.log",
+        "url": "#",
+        "meta": "4 entries · 2 errors"
+      }
+    ],
+    "createdAt": "2026-09-29T14:05:00Z"
+  },
+  "rootCause": {
+    "symbol": "applyDiscount(cart, discount)",
+    "file": "src/cart/pricing.ts",
+    "line": 15,
+    "summary": "The promo API sends `percentage`, but this function reads `discount.value`. The discount becomes NaN, so the cart total is NaN, and validateCart() resets the cart to empty when it's saved.",
+    "snippet": {
+      "startLine": 12,
+      "highlightLine": 15,
+      "note": "discount.value is undefined → amount = NaN",
+      "code": "export function applyDiscount(cart: Cart, discount?: Discount): number {\n  if (!discount) return cart.subtotal;\n  const amount = discount.type === 'percent'\n    ? cart.subtotal * (discount.value / 100)\n    : discount.value;\n  return round2(cart.subtotal - amount);\n}"
+    },
+    "path": [
+      {
+        "layer": "ui",
+        "title": "click button#cart-save",
+        "location": "src/cart/CartPage.tsx:88",
+        "value": "total 71.40",
+        "details": [
+          {
+            "key": "handler",
+            "value": "CartPage.handleSave()"
+          },
+          {
+            "key": "at",
+            "value": "00:28.400 in recording"
+          }
+        ]
+      },
+      {
+        "layer": "client",
+        "title": "saveCart(cart)",
+        "location": "src/cart/api.ts:31",
+        "value": "total 71.40",
+        "details": [
+          {
+            "key": "payload",
+            "value": "{ cartId: \"cart_8Kq2xN\", promo: \"SPRING15\" }"
+          }
+        ]
+      },
+      {
+        "layer": "network",
+        "title": "POST /api/cart/save",
+        "location": "200 · 142 ms · 612 B",
+        "value": "total 71.40",
+        "details": [
+          {
+            "key": "request",
+            "value": "{ cartId, promo, total: 71.4 }"
+          },
+          {
+            "key": "response",
+            "value": "{ items: [], total: null }",
+            "wrong": true
+          }
+        ]
+      },
+      {
+        "layer": "server",
+        "title": "handleCartSave(req)",
+        "location": "server/routes/cart.ts:54",
+        "value": "subtotal 84",
+        "details": [
+          {
+            "key": "discount",
+            "value": "from promo service, legacy shape"
+          }
+        ]
+      },
+      {
+        "layer": "server",
+        "title": "recalculateTotals(cart)",
+        "location": "src/cart/totals.ts:22",
+        "value": "subtotal 84",
+        "details": [
+          {
+            "key": "calls",
+            "value": "applyDiscount(cart, discount)"
+          }
+        ]
+      }
+    ],
+    "downstream": [
+      {
+        "title": "validateCart(cart)",
+        "note": "src/cart/validate.ts:12 · non-finite total, cart reset to empty"
+      },
+      {
+        "title": "200 { items: [], total: null }",
+        "note": "response to POST /api/cart/save"
+      },
+      {
+        "title": "<CartSummary> total.toFixed()",
+        "note": "CartSummary.tsx:41 · TypeError, page shows an empty cart"
+      }
+    ]
+  },
+  "test": {
+    "file": "src/cart/__tests__/pricing.repro.test.ts",
+    "runner": "vitest",
+    "command": "pnpm vitest run src/cart/__tests__/pricing.repro.test.ts",
+    "code": "import { describe, it, expect } from 'vitest';\nimport { applyDiscount } from '../pricing';\nimport session from './fixtures/bug-218.session.json';\n\ndescribe('applyDiscount — BUG-218', () => {\n  it('keeps a finite total when a percent promo is applied', () => {\n    const total = applyDiscount(session.cart, session.discount);\n    expect(Number.isFinite(total)).toBe(true);\n    expect(total).toBe(71.4);\n  });\n});",
+    "fixtures": [
+      {
+        "file": "src/cart/__tests__/fixtures/bug-218.session.json",
+        "note": "Recreated from the user's session. Removed: customer email, shipping address, payment token.",
+        "code": "{\n  \"cart\": {\n    \"id\": \"cart_8Kq2xN\",\n    \"currency\": \"USD\",\n    \"items\": [\n      { \"sku\": \"TEE-ORG-M\", \"name\": \"Organic Cotton Tee\", \"qty\": 2, \"unitPrice\": 24 },\n      { \"sku\": \"CAP-WOOL\", \"name\": \"Wool Cap\", \"qty\": 1, \"unitPrice\": 36 }\n    ],\n    \"subtotal\": 84\n  },\n  \"discount\": {\n    \"code\": \"SPRING15\",\n    \"type\": \"percent\",\n    \"percentage\": 15\n  }\n}"
+      }
+    ],
+    "runs": {
+      "total": 20,
+      "failed": 20
+    },
+    "output": "FAIL pricing.repro.test.ts\n  applyDiscount — BUG-218\n    × keeps a finite total when a percent promo is applied\n\nAssertionError: expected false to be true\n  ❯ pricing.repro.test.ts:8:36\n    received  total = NaN\n\nTests  1 failed (1) · Duration 4ms"
+  },
+  "bisect": {
+    "culprit": {
+      "sha": "a3f9c0e27d5b41c88f06e2a9d3b7c14f5e8a90d2",
+      "subject": "refactor discount calculation",
+      "author": "Maya Chen",
+      "date": "2026-09-18T14:00:00Z",
+      "email": "maya.chen@acme.dev",
+      "pr": {
+        "number": 1482,
+        "title": "Pricing cleanup",
+        "url": "https://github.com/acme/shop-web/pull/1482"
+      }
+    },
+    "lastGood": {
+      "sha": "6f3b8e1",
+      "subject": "Update promo copy for spring sale",
+      "author": "Tom Okafor",
+      "date": "2026-09-17T14:00:00Z"
+    },
+    "commitsSearched": 1239,
+    "probes": [
+      {
+        "commit": {
+          "sha": "f81d2c4",
+          "subject": "Merge #1496: update shipping copy",
+          "author": "Lena Fischer",
+          "date": "2026-09-30T14:00:00Z"
+        },
+        "outcome": "fail",
+        "seconds": 6.0,
+        "index": 0
+      },
+      {
+        "commit": {
+          "sha": "7c21e4b",
+          "subject": "Add wishlist sync endpoint",
+          "author": "Priya Raman",
+          "date": "2025-04-01T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 6.1,
+        "index": 619
+      },
+      {
+        "commit": {
+          "sha": "e84d1a0",
+          "subject": "Move product images to CDN",
+          "author": "Diego Alvarez",
+          "date": "2025-12-31T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 5.8,
+        "index": 309
+      },
+      {
+        "commit": {
+          "sha": "19bf6c2",
+          "subject": "Bump vitest to 2.1",
+          "author": "Sam Whitfield",
+          "date": "2026-05-17T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 6.4,
+        "index": 154
+      },
+      {
+        "commit": {
+          "sha": "4d0e9f1",
+          "subject": "Validate postcode format at checkout",
+          "author": "Lena Fischer",
+          "date": "2026-07-24T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 5.9,
+        "index": 77
+      },
+      {
+        "commit": {
+          "sha": "b52c3d8",
+          "subject": "Add Spring ’26 campaign banner",
+          "author": "Tom Okafor",
+          "date": "2026-08-27T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 6.2,
+        "index": 38
+      },
+      {
+        "commit": {
+          "sha": "0e6a47c",
+          "subject": "Fix flaky cart drawer animation",
+          "author": "Priya Raman",
+          "date": "2026-09-13T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 6.0,
+        "index": 19
+      },
+      {
+        "commit": {
+          "sha": "9a17f22",
+          "subject": "Show savings line in cart summary",
+          "author": "Diego Alvarez",
+          "date": "2026-09-22T14:00:00Z"
+        },
+        "outcome": "fail",
+        "seconds": 5.7,
+        "index": 9
+      },
+      {
+        "commit": {
+          "sha": "6f3b8e1",
+          "subject": "Update promo copy for spring sale",
+          "author": "Tom Okafor",
+          "date": "2026-09-17T14:00:00Z"
+        },
+        "outcome": "pass",
+        "seconds": 6.3,
+        "index": 14
+      },
+      {
+        "commit": {
+          "sha": "c40d791",
+          "subject": "Add loading state to Save cart",
+          "author": "Sam Whitfield",
+          "date": "2026-09-20T14:00:00Z"
+        },
+        "outcome": "fail",
+        "seconds": 5.8,
+        "index": 11
+      },
+      {
+        "commit": {
+          "sha": "2b9e5a3",
+          "subject": "Add tests for round2 helper",
+          "author": "Maya Chen",
+          "date": "2026-09-19T14:00:00Z"
+        },
+        "outcome": "fail",
+        "seconds": 6.1,
+        "index": 12
+      },
+      {
+        "commit": {
+          "sha": "a3f9c0e27d5b41c88f06e2a9d3b7c14f5e8a90d2",
+          "subject": "refactor discount calculation",
+          "author": "Maya Chen",
+          "date": "2026-09-18T14:00:00Z",
+          "email": "maya.chen@acme.dev",
+          "pr": {
+            "number": 1482,
+            "title": "Pricing cleanup",
+            "url": "https://github.com/acme/shop-web/pull/1482"
+          }
+        },
+        "outcome": "fail",
+        "seconds": 5.9,
+        "index": 13
+      }
+    ],
+    "seconds": 66,
+    "whyMissed": "The existing tests were updated to the new `value` field, but nothing tested the shape `/api/promo/validate` actually returns.",
+    "diff": [
+      {
+        "file": "src/cart/pricing.ts",
+        "additions": 2,
+        "deletions": 3,
+        "patch": "@@ -12,8 +12,7 @@ export function applyDiscount(\n export function applyDiscount(cart: Cart, discount?: Discount): number {\n   if (!discount) return cart.subtotal;\n-  const pct = discount.percentage ?? 0;\n   const amount = discount.type === 'percent'\n-    ? cart.subtotal * (pct / 100)\n-    : discount.amount;\n+    ? cart.subtotal * (discount.value / 100)\n+    : discount.value;\n   return round2(cart.subtotal - amount);\n }"
+      },
+      {
+        "file": "src/cart/types.ts",
+        "additions": 1,
+        "deletions": 2,
+        "patch": "@@ -8,6 +8,5 @@ export interface Discount {\n   code: string;\n   type: 'percent' | 'fixed';\n-  percentage?: number;\n-  amount?: number;\n+  value: number;\n }"
+      }
+    ]
+  },
+  "pr": {
+    "number": 1497,
+    "url": "https://github.com/acme/shop-web/pull/1497",
+    "title": "Add failing test for cart emptying on save",
+    "branch": "trace/bug-218-cart-save",
+    "state": "open",
+    "openedAt": "2026-09-29T15:07:00Z",
+    "reviewers": [
+      {
+        "name": "Maya Chen",
+        "reason": "wrote a3f9c0e"
+      },
+      {
+        "name": "Tom Okafor",
+        "reason": "owns src/cart"
+      }
+    ]
+  },
+  "startedAt": "2026-09-29T15:05:00Z",
+  "finishedAt": "2026-09-29T15:07:14Z"
+}

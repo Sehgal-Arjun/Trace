@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* Palette from the Trace design. The app is dark-only. */
+@theme {
+  --color-bg: #0a0b0d;
+  --color-sidebar: #0d0e11;
+  --color-panel: #0f1013;
+  --color-inset: #0b0c0e;
+  --color-field: #101115;
+  --color-raised: #16171b;
+  --color-hover: #1c1e23;
+  --color-row-hover: #141519;
+  --color-selected: #17181c;
+
+  --color-line: #1b1d22;
+  --color-line-2: #1e2026;
+  --color-line-3: #24262c;
+  --color-line-4: #2a2d34;
+
+  --color-fg: #e8e9ec;
+  --color-fg-strong: #f1f2f4;
+  --color-fg-2: #c9ccd3;
+  --color-fg-3: #a1a5ae;
+  --color-muted: #7d828c;
+  --color-faint: #4a4e57;
+
+  --color-accent: #ff5f4a;
+  --color-accent-fg: #ff8a7a;
+  --color-pass: #3fb27f;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  ::selection {
+    background: rgb(255 95 74 / 0.35);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-3);
+    border-radius: 10px;
+    border: 2px solid var(--color-bg);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a8f98;
+}

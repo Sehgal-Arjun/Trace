@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { BetaToolRunnerParams } from "@anthropic-ai/sdk/lib/tools/BetaToolRunner";
 import type { TraceHop } from "@trace/core";
 import { z } from "zod";
 import { describeLeads, findLeads } from "./leads.ts";
@@ -59,11 +60,14 @@ export async function investigate(
     <A>(name: string, fn: (a: A) => string | Promise<string>) =>
     async (a: A) => {
       log(`${name} ${summarize(a)}`);
+      let out: string;
       try {
-        return await fn(a);
+        out = await fn(a);
       } catch (e) {
-        return `error: ${(e as Error).message}`;
+        out = `error: ${(e as Error).message}`;
       }
+      if (name === "run_test" || name === "submit" || out.startsWith("error:")) log(`  → ${out.split("\n").slice(0, 6).join(" | ").slice(0, 400)}`);
+      return out;
     };
 
   const tools = [
@@ -176,7 +180,7 @@ export async function investigate(
 
   const leads = describeLeads(findLeads(sandbox.root, `${report.title}\n${report.body}`));
   const fallback = SUPPORTS_FALLBACK[tier.model];
-  const runner = client.beta.messages.toolRunner({
+  const params: Omit<BetaToolRunnerParams, "messages" | "stream"> & { stream?: false } = {
     model: tier.model,
     max_tokens: 16000,
     max_iterations: opts.maxIterations ?? 50,
@@ -199,30 +203,51 @@ export async function investigate(
     betas: ["context-management-2025-06-27", ...(fallback ? ["server-side-fallback-2026-07-01"] : [])],
     ...(fallback ? { fallbacks: "default" as const } : {}),
     tools,
-    messages: [
+  };
+  let messages: Anthropic.Beta.BetaMessageParam[] = [
+    {
+      role: "user",
+      content: [
+        `Bug report\n\nTitle: ${report.title}\n\n${report.body}`,
+        opts.context ? `\n\nAn engineer added: ${opts.context}` : "",
+        leads ? `\n\n${leads}` : "",
+      ].join(""),
+    },
+  ];
+
+  // Models sometimes stop without an accepted test, after a rejected submit or when they lose
+  // confidence. Before giving up (and paying for a bigger model), ask them to keep going.
+  const MAX_NUDGES = 2;
+  let last: Anthropic.Beta.BetaMessage | undefined;
+  for (let nudge = 0; ; nudge++) {
+    const runner = client.beta.messages.toolRunner({ ...params, messages });
+    for await (const message of runner) {
+      last = message;
+      usage.requests++;
+      usage.inputTokens += message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0);
+      usage.outputTokens += message.usage.output_tokens;
+      usage.costUsd += costOf(tier.model, message.usage);
+      if (message.stop_reason === "refusal") return { ok: false, reason: "the model declined the request", usage };
+      if (finding) break;
+      if (usage.costUsd >= tier.budgetUsd) {
+        return { ok: false, reason: `Couldn't reproduce within the $${tier.budgetUsd.toFixed(2)} budget for ${tier.model}.`, usage };
+      }
+    }
+    if (finding || nudge >= MAX_NUDGES || !last || last.stop_reason !== "end_turn") break;
+    log(`nudging the model to continue (${nudge + 1}/${MAX_NUDGES})`);
+    // The runner's history ends with our tool results; add the model's final reply unchanged,
+    // then the nudge.
+    messages = [
+      ...runner.params.messages,
+      { role: "assistant", content: last.content },
       {
         role: "user",
-        content: [
-          `Bug report\n\nTitle: ${report.title}\n\n${report.body}`,
-          opts.context ? `\n\nAn engineer added: ${opts.context}` : "",
-          leads ? `\n\n${leads}` : "",
-        ].join(""),
+        content:
+          submits === 0
+            ? "You haven't submitted a test yet. Keep investigating: write a test that fails at this commit because of the bug, run it, and submit it."
+            : "Your last submission wasn't accepted. Read the output it returned, fix the test so it fails on an assertion about the correct behavior, and submit again.",
       },
-    ],
-  });
-
-  let last: Anthropic.Beta.BetaMessage | undefined;
-  for await (const message of runner) {
-    last = message;
-    usage.requests++;
-    usage.inputTokens += message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0);
-    usage.outputTokens += message.usage.output_tokens;
-    usage.costUsd += costOf(tier.model, message.usage);
-    if (message.stop_reason === "refusal") return { ok: false, reason: "the model declined the request", usage };
-    if (finding) break;
-    if (usage.costUsd >= tier.budgetUsd) {
-      return { ok: false, reason: `Couldn't reproduce within the $${tier.budgetUsd.toFixed(2)} budget for ${tier.model}.`, usage };
-    }
+    ];
   }
 
   if (finding) return { ok: true, finding, usage };

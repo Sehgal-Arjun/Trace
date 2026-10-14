@@ -1,22 +1,26 @@
 {
-  "n8n-io/n8n": {
-    "prepare": "pnpm exec turbo run build --filter={package}^...",
-    "note": "Workspace packages (e.g. @n8n/vitest-config, n8n-workflow) resolve to dist/, so the test's package dependencies are built first."
-  },
-  "twentyhq/twenty": {
-    "prepare": "cp -n packages/twenty-front/.env.example packages/twenty-front/.env 2>/dev/null; npx nx run-many -t build -p twenty-shared twenty-ui twenty-emails",
-    "note": "twenty-shared, twenty-ui and twenty-emails resolve to dist/. Jest must run from the package with its jest.config.mjs, which the runner detection now does."
+  "directus/directus": {
+    "prepare": "corepack pnpm --filter \"{package}^...\" run build",
+    "note": "Workspace packages such as @directus/env resolve to dist/, so the test package's dependencies are built first. Native modules (sqlite3, isolated-vm) need install scripts, which the eval enables."
   },
   "laurent22/joplin": {
     "skip": true,
     "note": "Jest only runs tsc-compiled .test.js files, so every test Trace writes would need compiling before it can run."
   },
-  "RocketChat/Rocket.Chat": {
-    "skip": true,
-    "note": "Needs a ~15 minute workspace build, mixes jest and mocha by file, and a bundled Yarn plugin refuses any Node but the pinned one."
+  "n8n-io/n8n": {
+    "prepare": "pnpm exec turbo run build --filter={package}^...",
+    "note": "Workspace packages (e.g. @n8n/vitest-config, n8n-workflow) resolve to dist/, so the test's package dependencies are built first."
   },
   "outline/outline": {
     "skip": true,
     "note": "Server tests need a Postgres database. Shared-code tests work (outline#13722 passes), but most cases are server-side."
+  },
+  "RocketChat/Rocket.Chat": {
+    "skip": true,
+    "note": "Needs a ~15 minute workspace build, mixes jest and mocha by file, and a bundled Yarn plugin refuses any Node but the pinned one."
+  },
+  "twentyhq/twenty": {
+    "prepare": "cp -n packages/twenty-front/.env.example packages/twenty-front/.env 2>/dev/null; npx nx run-many -t build -p twenty-shared twenty-ui twenty-emails",
+    "note": "twenty-shared, twenty-ui and twenty-emails resolve to dist/. Jest must run from the package with its jest.config.mjs, which the runner detection now does."
   }
 }

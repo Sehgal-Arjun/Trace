@@ -1,7 +1,8 @@
 import type { Bisect, Commit, Probe, Repo, Report, ReproTest, RootCause, Run } from "@trace/core";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureInstalled, findCulprit, type SearchResult, type Setup } from "./bisect.ts";
+import { findCulprit, type SearchResult } from "./bisect.ts";
+import { ensureInstalled, type Setup } from "./setup.ts";
 import { investigate, type BugReport, type Finding, type InvestigateResult, type Usage } from "./investigate.ts";
 import { DEFAULT_LADDER, type Tier } from "./models.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -37,7 +38,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
     git(o.root, "clean", "-fdq", "-e", "node_modules", "-e", "**/node_modules");
     git(o.root, "checkout", "--quiet", "--detach", o.resume.commit);
   }
-  const sandbox = new Sandbox(o.root);
+  const sandbox = new Sandbox(o.root, o.setup);
   const base: Run = { id: o.id, repo: o.repo, commit: sandbox.head, report: o.report, status: "tracing", startedAt };
   const progress = o.onProgress ?? (() => {});
 
@@ -74,7 +75,7 @@ export async function trace(o: TraceOptions): Promise<Run> {
     const reruns = o.reruns ?? 10;
     let failed = 0;
     for (let i = 0; i < reruns; i++) {
-      const r = await runTestFile(sandbox.root, f.testFile, { names: f.testNames, timeoutSec: 300 });
+      const r = await runTestFile(sandbox.root, f.testFile, { names: f.testNames, timeoutSec: 300, setup: o.setup });
       if (r.cases.some((c) => c.status === "failed" && c.assertion)) failed++;
     }
     log(`test failed ${failed} of ${reruns} reruns`);

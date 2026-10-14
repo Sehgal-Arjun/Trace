@@ -159,7 +159,7 @@ export async function investigate(
         submits++;
         const testFile = a.test_file;
         if (!sandbox.written.has(testFile)) return `${testFile} isn't a file you wrote with write_test_file.`;
-        const run = matching(await runTestFile(sandbox.root, testFile, { timeoutSec: 300 }), a.test_names);
+        const run = matching(await runTestFile(sandbox.root, testFile, { timeoutSec: 300, setup: sandbox.setup }), a.test_names);
         const reproducing = run.cases.filter((c) => c.status === "failed" && c.assertion);
         if (!run.ran || reproducing.length === 0) {
           const verdict = !run.ran ? "the test file didn't run" : "none of the named tests fail on an assertion";

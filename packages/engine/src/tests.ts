@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { nodeEnv } from "./node.ts";
+import { prepareFor, type Setup } from "./setup.ts";
 import { sh } from "./shell.ts";
 
 export type Runner = "vitest" | "jest";
@@ -26,10 +27,20 @@ export type TestRun = {
   seconds: number;
 };
 
-/** Finds the nearest package.json above the test file that uses vitest or jest. */
+const JEST_CONFIG = ["jest.config.js", "jest.config.ts", "jest.config.mjs", "jest.config.cjs", "jest.config.json"];
+const VITEST_CONFIG = ["vitest.config.ts", "vitest.config.mts", "vitest.config.js", "vitest.config.mjs", "vitest.config.cts"];
+
+/**
+ * Finds the runner and the directory to run it from: the nearest directory above the test file
+ * with a jest or vitest config file (the runner only finds its config from there), or failing
+ * that the nearest package.json that uses vitest or jest.
+ */
 export function detectRunner(root: string, testFile: string): { runner: Runner; pkgDir: string } | null {
   let d = dirname(join(root, testFile));
   while (d.startsWith(root)) {
+    const jest = JEST_CONFIG.some((f) => existsSync(join(d, f)));
+    const vitest = VITEST_CONFIG.some((f) => existsSync(join(d, f)));
+    if (jest !== vitest) return { runner: jest ? "jest" : "vitest", pkgDir: d };
     const pj = join(d, "package.json");
     if (existsSync(pj)) {
       const p = JSON.parse(readFileSync(pj, "utf8"));
@@ -77,12 +88,14 @@ export async function runTestFile(
   root: string,
   testFile: string,
   /** names: full test names (describe blocks + title, space-joined) to report on; all if omitted. */
-  opts: { names?: string[]; timeoutSec?: number; env?: Record<string, string> } = {},
+  opts: { names?: string[]; timeoutSec?: number; env?: Record<string, string>; setup?: Setup } = {},
 ): Promise<TestRun> {
   const t0 = Date.now();
   const seconds = () => Math.round((Date.now() - t0) / 100) / 10;
   const r = detectRunner(root, testFile);
   if (!r) return { ran: false, cases: [], loadError: `no vitest or jest found above ${testFile}`, output: "", seconds: 0 };
+  const prepError = await prepareFor(root, opts.setup, testFile);
+  if (prepError) return { ran: false, cases: [], loadError: prepError, output: "", seconds: seconds() };
 
   const rel = relative(r.pkgDir, join(root, testFile));
   const report = join(root, ".trace-report.json");

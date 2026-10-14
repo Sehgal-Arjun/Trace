@@ -78,8 +78,8 @@ const cases = readFileSync(join(HERE, "cases.jsonl"), "utf8").split("\n").filter
 const c = cases.find((x) => x.id === values.id);
 if (!c) throw new Error(`no case ${values.id} in cases.jsonl`);
 
-const recipes = JSON.parse(readFileSync(join(HERE, "recipes.json"), "utf8")) as Record<string, Setup & { note?: string }>;
-const { note: _note, ...recipe } = recipes[c.repo] ?? {};
+const recipes = JSON.parse(readFileSync(join(HERE, "recipes.json"), "utf8")) as Record<string, Setup & { note?: string; skip?: boolean }>;
+const { note: _note, skip: _skip, ...recipe } = recipes[c.repo] ?? {};
 const setup: Setup = { scripts: values.scripts, ...recipe };
 
 const slug = c.id.replace(/[/#]/g, "__");
@@ -190,7 +190,7 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   };
   const passingAtFix = new Map<string, Set<string>>();
   for (const f of tests) {
-    const r = await runTestFile(root, f);
+    const r = await runTestFile(root, f, { setup });
     describe("at fix", f, r);
     passingAtFix.set(f, new Set(r.cases.filter((x) => x.status === "passed").map((x) => x.name)));
   }
@@ -201,7 +201,7 @@ async function groundTruth(root: string, pre: string, fix: string): Promise<Trut
   if (installAtPre) return { status: "invalid", reason: `install failed before the fix: ${installAtPre.slice(-200)}` };
   let best: { file: string; names: string[] } | null = null;
   for (const f of tests) {
-    const r = await runTestFile(root, f);
+    const r = await runTestFile(root, f, { setup });
     describe("before fix", f, r);
     const names = r.cases.filter((x) => x.status === "failed" && x.assertion && passingAtFix.get(f)?.has(x.name)).map((x) => x.name);
     if (names.length && (!best || names.length > best.names.length)) best = { file: f, names };
@@ -229,7 +229,7 @@ async function passesAt(root: string, fix: string, run: Run): Promise<boolean | 
   reset(root, fix);
   writeFiles(root, new Map([[t.file, t.code], ...(t.fixtures ?? []).map((f) => [f.file, f.code] as [string, string])]));
   if (await ensureInstalled(root, setup)) return null;
-  const r = await runTestFile(root, t.file, { names: t.names });
+  const r = await runTestFile(root, t.file, { names: t.names, setup });
   return r.ran && r.cases.length > 0 && r.cases.every((x) => x.status === "passed");
 }
 

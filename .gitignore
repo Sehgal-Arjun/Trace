@@ -5,7 +5,14 @@ node_modules/
 .env*.local
 *.log
 
+# local worktrees for parallel branches
+.worktrees/
+
 # secrets
 .env
 .env.*
 !.env.example
+
+# benchmark: repo clones and generated data
+.cache/
+bench/data/

@@ -1,0 +1,89 @@
+name: Eval
+
+# Runs Trace on benchmark bugs and scores it against the maintainers' own fixes.
+# Each case is its own job; the summary job posts a scorecard and uploads every result.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "Case ids, comma-separated (blank: pick automatically)"
+        default: ""
+      limit:
+        description: "Max cases when picking automatically"
+        default: "30"
+      per_repo:
+        description: "Max cases per repo when picking automatically"
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        env:
+          IDS: ${{ inputs.ids }}
+          LIMIT: ${{ inputs.limit }}
+          PER_REPO: ${{ inputs.per_repo }}
+        run: node bench/eval/plan.ts --ids "$IDS" --limit "$LIMIT" --per-repo "$PER_REPO" >> "$GITHUB_OUTPUT"
+
+  case:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        id: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      CASE_ID: ${{ matrix.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile --filter @trace/bench...
+      - name: Run case
+        run: node bench/eval/case.ts --id "$CASE_ID" --work "$RUNNER_TEMP/trace" --out results
+      - name: Name the artifact
+        if: always()
+        run: echo "SLUG=$(echo "$CASE_ID" | tr '/#' '__')" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ env.SLUG }}
+          path: results/
+          if-no-files-found: ignore
+
+  summary:
+    needs: case
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          merge-multiple: true
+          path: results
+      - run: node bench/eval/summarize.ts results | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: results/

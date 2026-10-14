@@ -1,0 +1,17 @@
+{
+  "name": "@trace/bench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "case": "node eval/case.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@trace/core": "workspace:*",
+    "@trace/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}

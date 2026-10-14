@@ -18,6 +18,8 @@ export type Finding = {
   /** The tests in testFile that reproduce the bug (they fail at HEAD on an assertion). */
   testNames: string[];
   files: Map<string, string>;
+  /** Unified diff of the fix the agent proposed; the test passed with it applied. */
+  fixDiff: string;
   headRun: TestRun;
 };
 
@@ -38,10 +40,12 @@ What a good result looks like:
 - The test fails now because the behavior is wrong: an assertion about what the user expected. A test that fails because of an import error, a missing function, or a crash in the test setup doesn't count.
 - The test should pass once the bug is fixed, so assert the correct behavior, not the buggy one. Don't depend on the current date, time zone, network, or randomness unless you control them in the test.
 - Prefer testing behavior that existed before the bug was introduced, using functions and modules that have been in the codebase for a while. Trace will run your test against older commits to find the change that broke things, so a test that relies on brand-new APIs can't do that.
+- Test the root cause you found, at the level where it goes wrong. If the bug is that a function returns the wrong value, call that function; don't test a component further down the line through heavy mocking, because a fix to the root cause may not change what such a test sees.
+- Assert only what the report says is wrong. Don't pin down details the report doesn't mention: a reasonable fix might do them differently.
 
 Recent history is often the fastest lead: if the report says something used to work, look at recent commits touching the relevant code.
 
-When the test fails for the right reason, call submit. Trace will run it itself; if it doesn't hold up you'll get the output back and can keep going.`;
+When the test fails for the right reason, call submit with the smallest fix to the source that would resolve the root cause. Trace applies that fix temporarily and checks that your test fails without it and passes with it; that's how it knows the test and the diagnosis match. The fix is only a check: it's thrown away, and Trace never commits it. If something doesn't hold up you'll get the output back and can keep going.`;
 
 export async function investigate(
   sandbox: Sandbox,
@@ -154,6 +158,16 @@ export async function investigate(
           .describe("Steps from what the user did down to the root cause, in order. Don't include the root cause itself."),
         test_file: z.string(),
         test_names: z.array(z.string()).min(1).describe("Names of the tests in test_file that reproduce the bug"),
+        fix: z
+          .array(
+            z.object({
+              path: z.string().describe("Source file to change"),
+              search: z.string().describe("Exact text to replace, copied from the file; must appear exactly once"),
+              replace: z.string(),
+            }),
+          )
+          .min(1)
+          .describe("The smallest change to the source that resolves the root cause. Used only to check the test; never committed."),
       }),
       run: guard("submit", async (a) => {
         submits++;
@@ -165,14 +179,30 @@ export async function investigate(
           const verdict = !run.ran ? "the test file didn't run" : "none of the named tests fail on an assertion";
           return `Not accepted: ${verdict}.\n${describeRun(run)}\nFix the test and submit again.`;
         }
+        // The test has to pass once the root cause is fixed, or it isn't testing that root cause.
+        const names = reproducing.map((c) => c.name);
+        const withFix = await sandbox.withEdits(a.fix, async () =>
+          matching(await runTestFile(sandbox.root, testFile, { names, timeoutSec: 300, setup: sandbox.setup }), names),
+        );
+        if (!withFix.ok) return `Not accepted: your fix couldn't be applied: ${withFix.error}. Fix it and submit again.`;
+        const stillFailing = withFix.result.cases.filter((c) => c.status !== "passed");
+        if (!withFix.result.ran || stillFailing.length) {
+          return [
+            `Not accepted: with your fix applied, the test still doesn't pass.`,
+            describeRun(withFix.result),
+            `Either the test checks something other than the root cause you described (for example a different layer, or details the report doesn't mention), or the fix doesn't resolve it. Rework whichever is wrong and submit again.`,
+          ].join("\n");
+        }
         finding = {
           rootCause: a.root_cause,
           path: a.path,
           testFile,
-          testNames: reproducing.map((c) => c.name),
+          testNames: names,
           files: new Map(sandbox.written),
           headRun: run,
+          fixDiff: withFix.diff,
         };
+        log(`  fix checked: test fails without it, passes with it`);
         return "Accepted. You're done; reply with a one-line summary.";
       }),
     }),

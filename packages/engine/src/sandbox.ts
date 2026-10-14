@@ -111,6 +111,36 @@ export class Sandbox {
     return describeRun(result);
   }
 
+  /**
+   * Applies search/replace edits to source files, runs `fn`, and puts every file back exactly as it
+   * was, even if `fn` throws. Used to check a proposed fix; nothing here is ever kept. Returns the
+   * diff of the edits alongside `fn`'s result, or an error if an edit can't be applied cleanly.
+   */
+  async withEdits<T>(
+    edits: { path: string; search: string; replace: string }[],
+    fn: () => Promise<T>,
+  ): Promise<{ ok: true; diff: string; result: T } | { ok: false; error: string }> {
+    const originals = new Map<string, string>();
+    try {
+      for (const e of edits) {
+        const rel = this.resolvePath(e.path);
+        if (TEST_FILE_RE.test(rel) || FIXTURE_RE.test(rel)) return { ok: false, error: `${rel} is a test file; the fix has to change source code` };
+        const abs = join(this.root, rel);
+        if (!existsSync(abs)) return { ok: false, error: `no such file: ${rel}` };
+        const current = readFileSync(abs, "utf8");
+        if (!originals.has(rel)) originals.set(rel, current);
+        const at = current.indexOf(e.search);
+        if (!e.search || at === -1) return { ok: false, error: `the search text wasn't found in ${rel}; copy it exactly from the file` };
+        if (current.indexOf(e.search, at + 1) !== -1) return { ok: false, error: `the search text appears more than once in ${rel}; include more surrounding lines` };
+        writeFileSync(abs, current.slice(0, at) + e.replace + current.slice(at + e.search.length));
+      }
+      const diff = git(this.root, "diff", "--", ...originals.keys());
+      return { ok: true, diff, result: await fn() };
+    } finally {
+      for (const [rel, content] of originals) writeFileSync(join(this.root, rel), content);
+    }
+  }
+
   /** Removes everything the agent wrote, restoring the checkout. */
   cleanup(): void {
     for (const rel of this.written.keys()) rmSync(join(this.root, rel), { force: true });

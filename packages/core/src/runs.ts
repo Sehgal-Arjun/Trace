@@ -57,6 +57,8 @@ export type RootCause = {
   line: number;
   summary: string; // one or two sentences, plain language
   snippet?: { startLine: number; code: string; highlightLine?: number; note?: string };
+  /** The minimal fix the agent proposed to prove its diagnosis (unified diff). Never committed. */
+  suggestedFix?: string;
   path: TraceHop[];
   downstream?: { title: string; note: string }[];
 };

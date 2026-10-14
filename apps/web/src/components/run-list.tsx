@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { StatusGlyph } from "@/components/status-glyph";
 import { ago } from "@/lib/format";
 import { STATUS } from "@/lib/runs/status";
-import type { RunStatus } from "@/lib/runs/types";
+import type { RunStatus } from "@trace/core";
 
 type Item = { id: string; title: string; status: RunStatus; createdAt: string };
 

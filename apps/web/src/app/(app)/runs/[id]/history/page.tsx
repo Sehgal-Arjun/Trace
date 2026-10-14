@@ -5,7 +5,7 @@ import { Prose } from "@/components/prose";
 import { RunView } from "@/components/run-view";
 import { duration, initials, shortDate, shortSha } from "@/lib/format";
 import { searchSteps } from "@/lib/runs/bisect";
-import type { Bisect, Probe, Run } from "@/lib/runs/types";
+import type { Bisect, Probe, Run } from "@trace/core";
 
 // History tab: how Trace searched the commit history, and the commit it landed on.
 export default function HistoryPage({ params }: PageProps<"/runs/[id]/history">) {

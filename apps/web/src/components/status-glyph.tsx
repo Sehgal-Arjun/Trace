@@ -1,5 +1,5 @@
 import { STATUS } from "@/lib/runs/status";
-import type { RunStatus } from "@/lib/runs/types";
+import type { RunStatus } from "@trace/core";
 
 export function StatusGlyph({ status, size = 13 }: { status: RunStatus; size?: number }) {
   const s = STATUS[status];

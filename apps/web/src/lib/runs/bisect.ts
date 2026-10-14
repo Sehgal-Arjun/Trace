@@ -1,4 +1,4 @@
-import type { Bisect, Probe } from "./types";
+import type { Bisect, Probe } from "@trace/core";
 
 /**
  * One row of the history search: the window of commits still in doubt before

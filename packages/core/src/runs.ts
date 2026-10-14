@@ -64,6 +64,8 @@ export type RootCause = {
 export type ReproTest = {
   file: string;
   code: string;
+  /** Full names of the tests in the file that reproduce the bug. */
+  names?: string[];
   runner: "vitest" | "jest";
   command: string;
   fixtures?: { file: string; code: string; note?: string }[];
@@ -113,9 +115,28 @@ export type PullRequest = {
   reviewers: { name: string; reason: string }[];
 };
 
+/** One pass of the pipeline over a run. A run's top-level fields describe the latest attempt. */
+export type Attempt = {
+  n: number;
+  trigger:
+    | { kind: "initial" }
+    | { kind: "ticket_changed"; reason: string }
+    | { kind: "command"; by: string; context?: string }
+    | { kind: "button"; by: string };
+  /** The report as it read when this attempt started. */
+  report: Pick<Report, "title" | "body">;
+  status: RunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  /** e.g. "culprit 2c3e2a3, pushed to #1497" or "couldn't reproduce". */
+  summary?: string;
+};
+
 export type Run = {
   id: string; // short human id, e.g. "BUG-218"
   repo: Repo;
+  /** The commit Trace investigated: where the report was filed. */
+  commit?: string;
   status: RunStatus;
   report: Report;
   rootCause?: RootCause;
@@ -123,6 +144,10 @@ export type Run = {
   bisect?: Bisect;
   pr?: PullRequest;
   error?: string;
+  /** Model spend for the latest attempt, one entry per model tried. */
+  usage?: { model: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number }[];
+  /** Earlier and current attempts, oldest first. */
+  attempts?: Attempt[];
   startedAt?: string;
   finishedAt?: string;
 };

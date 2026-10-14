@@ -2,7 +2,7 @@ import { Code, langOf } from "@/components/code";
 import { CopyButton } from "@/components/copy-button";
 import { Badge, Panel } from "@/components/panel";
 import { RunView } from "@/components/run-view";
-import type { ReproTest } from "@/lib/runs/types";
+import type { ReproTest } from "@trace/core";
 
 // Test tab: the reproduction test Trace wrote, its fixtures, and proof it fails reliably.
 export default function TestPage({ params }: PageProps<"/runs/[id]/test">) {

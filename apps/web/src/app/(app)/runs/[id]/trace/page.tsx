@@ -3,7 +3,7 @@ import { Code } from "@/components/code";
 import { Badge, Panel } from "@/components/panel";
 import { Prose } from "@/components/prose";
 import { RunView } from "@/components/run-view";
-import type { RootCause, Run, TraceHop } from "@/lib/runs/types";
+import type { RootCause, Run, TraceHop } from "@trace/core";
 
 const LAYER: Record<TraceHop["layer"], string> = { ui: "UI", client: "Client", network: "Network", server: "Server", data: "Data" };
 

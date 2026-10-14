@@ -2,7 +2,7 @@ import { RunTabs, type Tab } from "@/components/run-tabs";
 import { RunView } from "@/components/run-view";
 import { StatusPill } from "@/components/status-glyph";
 import { shortSha, since } from "@/lib/format";
-import type { Run } from "@/lib/runs/types";
+import type { Run } from "@trace/core";
 
 export default function RunLayout({ children, params }: LayoutProps<"/runs/[id]">) {
   return (

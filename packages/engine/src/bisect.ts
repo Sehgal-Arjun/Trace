@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { git, sh } from "./shell.ts";
+import { ensureInstalled, type Setup } from "./setup.ts";
+import { git } from "./shell.ts";
 import { runTestFile, type TestRun } from "./tests.ts";
 
 export type Outcome = "pass" | "fail" | "skip";
@@ -30,7 +30,7 @@ export type SearchOptions = {
   testFile: string;
   /** Tests that fail at `start`; the search judges commits only on these. */
   testNames: string[];
-  install?: string;
+  setup?: Setup;
   maxHistory?: number;
   log?: (line: string) => void;
 };
@@ -66,9 +66,9 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     };
 
     checkout(o.root, sha, o.files);
-    const err = await ensureInstalled(o.root, o.install);
+    const err = await ensureInstalled(o.root, o.setup);
     if (err) return done("skip", err);
-    const run = await runTestFile(o.root, o.testFile, { names: [...focus], timeoutSec: 600 });
+    const run = await runTestFile(o.root, o.testFile, { names: [...focus], timeoutSec: 600, setup: o.setup });
     return judge(run, done);
   };
 
@@ -144,24 +144,8 @@ export async function findCulprit(o: SearchOptions): Promise<SearchResult> {
     return { status: "found", culprit: history[lo], lastGood: history[hi], probes, commitsSearched: good, seconds: elapsed(), testNames: [...focus] };
   } finally {
     checkout(o.root, o.start, o.files);
-    await ensureInstalled(o.root, o.install);
+    await ensureInstalled(o.root, o.setup);
   }
-}
-
-/**
- * Installs dependencies if the lockfile differs from the one last installed here. The key of
- * the installed lockfile is kept in node_modules, so this holds across processes and catches a
- * checkout whose dependencies belong to some other commit.
- */
-export async function ensureInstalled(root: string, install?: string): Promise<string | null> {
-  const marker = join(root, "node_modules", ".trace-lockfile");
-  const key = lockKey(root);
-  if (existsSync(marker) && readFileSync(marker, "utf8") === key) return null;
-  const r = await sh(install ?? defaultInstall(root), root, { timeoutSec: 1800 });
-  if (r.code !== 0) return `install failed: ${r.out.slice(-300)}`;
-  mkdirSync(dirname(marker), { recursive: true });
-  writeFileSync(marker, key);
-  return null;
 }
 
 function checkout(root: string, sha: string, files: Map<string, string>) {
@@ -172,23 +156,4 @@ function checkout(root: string, sha: string, files: Map<string, string>) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content);
   }
-}
-
-function lockKey(root: string): string {
-  const h = createHash("sha1");
-  for (const f of ["pnpm-lock.yaml", "yarn.lock", "package-lock.json", "bun.lock", "bun.lockb"]) {
-    const p = join(root, f);
-    if (existsSync(p)) h.update(f).update(readFileSync(p));
-  }
-  return h.digest("hex");
-}
-
-export function defaultInstall(root: string): string {
-  if (existsSync(join(root, "pnpm-lock.yaml"))) return "corepack pnpm install --frozen-lockfile --ignore-scripts || corepack pnpm install --ignore-scripts";
-  if (existsSync(join(root, "yarn.lock"))) {
-    return existsSync(join(root, ".yarnrc.yml"))
-      ? "YARN_ENABLE_SCRIPTS=0 corepack yarn install --immutable || YARN_ENABLE_SCRIPTS=0 corepack yarn install"
-      : "corepack yarn install --frozen-lockfile --ignore-scripts";
-  }
-  return "npm ci --ignore-scripts || npm install --ignore-scripts";
 }

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { git, tryGit } from "./shell.ts";
+import type { Setup } from "./setup.ts";
 import { matching, runTestFile, type TestRun } from "./tests.ts";
 
 const TEST_FILE_RE = /(\.|_)(test|spec)\.[cm]?[jt]sx?$|(^|\/)__tests__\//;
@@ -21,9 +22,11 @@ export class Sandbox {
   /** Files the agent wrote, so they can be collected and cleaned up. */
   readonly written = new Map<string, string>();
   lastRun?: { file: string; result: TestRun };
+  readonly setup?: Setup;
 
-  constructor(root: string) {
+  constructor(root: string, setup?: Setup) {
     this.root = realpathSync(root);
+    this.setup = setup;
     this.head = git(this.root, "rev-parse", "HEAD");
   }
 
@@ -103,7 +106,7 @@ export class Sandbox {
   async runTest(path: string, names?: string[]): Promise<string> {
     const rel = this.resolvePath(path);
     if (!existsSync(join(this.root, rel))) return `no such file: ${path}`;
-    const result = matching(await runTestFile(this.root, rel, { timeoutSec: 300 }), names);
+    const result = matching(await runTestFile(this.root, rel, { timeoutSec: 300, setup: this.setup }), names);
     this.lastRun = { file: rel, result };
     return describeRun(result);
   }

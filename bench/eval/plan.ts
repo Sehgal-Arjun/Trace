@@ -18,6 +18,9 @@ const { values } = parseArgs({
 });
 
 type Case = { id: string; repo: string; confidence: string };
+// Repos whose tests need more than a prepare step (a database, a compile-to-JS test flow) are
+// marked skip in recipes.json and left out of automatic picks.
+const recipes = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "recipes.json"), "utf8")) as Record<string, { skip?: boolean }>;
 const all = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "cases.jsonl"), "utf8")
   .split("\n")
   .filter(Boolean)
@@ -32,6 +35,7 @@ if (ids.length) {
   picked = ids;
 } else {
   const pool = all
+    .filter((c) => !recipes[c.repo]?.skip)
     .filter((c) => values.confidence === "any" || c.confidence === values.confidence)
     .sort((a, b) => Number(b.confidence === "strong") - Number(a.confidence === "strong"));
   const perRepo = new Map<string, number>();

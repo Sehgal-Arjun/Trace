@@ -1,6 +1,7 @@
 // Usage: node src/cli.ts --checkout <dir> --report <report.json> --repo owner/name [--id BUG-1] [--out run.json]
 //                        [--model claude-haiku-5-5|claude-sonnet-5-5|claude-opus-5-5] [--effort low|medium|high] [--budget 0.25]
 //                        [--resume]   continue the run saved in --out, e.g. after an interruption
+//                        [--install <cmd>] [--prepare <cmd>] [--scripts]   how to set up the checkout (see Setup)
 //
 // Without --model, Trace tries Haiku 5.5 and then Sonnet 5.5 (see DEFAULT_LADDER). --budget caps spend per model in dollars.
 //
@@ -26,6 +27,8 @@ const { values } = parseArgs({
     id: { type: "string", default: "BUG-1" },
     out: { type: "string" },
     install: { type: "string" },
+    prepare: { type: "string" },
+    scripts: { type: "boolean", default: false },
     model: { type: "string" },
     effort: { type: "string" },
     budget: { type: "string" },
@@ -72,7 +75,7 @@ const run = await trace({
   root: values.checkout,
   repo: { owner, name, defaultBranch: "main" },
   report: { title: report.title, body: report.body, source: { kind: "manual" }, attachments: [], createdAt: new Date().toISOString() },
-  install: values.install,
+  setup: { install: values.install, prepare: values.prepare, scripts: values.scripts },
   ladder,
   resume,
   onProgress: save,

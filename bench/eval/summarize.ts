@@ -30,6 +30,7 @@ const lines = [
   `| Reproduced the bug (test fails at the reported commit) | ${pct(count(traced, (r) => r.score?.reproduced), traced.length)} |`,
   `| Test passes with the real fix | ${pct(count(traced, (r) => r.score?.passesWithFix), traced.length)} |`,
   `| Found the same culprit commit | ${pct(count(withTruth, (r) => r.score?.culpritMatches), withTruth.length)} of cases with a known culprit |`,
+  `| Found a culprit where the maintainers' test couldn't | ${traced.filter((r) => r.truth.status !== "found" && r.trace?.culprit).length} (check these by hand) |`,
   `| Model cost | $${cost.toFixed(3)} total, $${traced.length ? (cost / traced.length).toFixed(3) : "0"} per case |`,
   "",
   "| Case | Ground truth | Trace | Reproduced | Passes with fix | Culprit | Cost | Time |",
